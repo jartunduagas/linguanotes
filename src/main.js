@@ -258,12 +258,15 @@ function renderWordRow(w) {
   const ls = langState();
   const canConj = w.isVerb && hasConjugation(m.id) && ls.activeTenses.length > 0;
 
+  const genderArticle = w.gender === "m" ? (m.id === "french" ? "le" : "o") : w.gender === "f" ? (m.id === "french" ? "la" : "a") : "";
   const grow = h("div", { class: "grow" }, [
     h("div", { class: "term" }, [
       document.createTextNode(w.term + " "),
       w.isVerb ? h("span", { class: "badge pill-verb" }, "verbo") : null,
+      w.isNoun && genderArticle ? h("span", { class: "badge pill-gender" }, genderArticle) : null,
     ]),
     h("div", { class: "trans", html: `🇬🇧 <b>${esc(w.en) || "—"}</b> &nbsp;·&nbsp; 🇪🇸 <b>${esc(w.es) || "—"}</b>` }),
+    w.isVerb && w.preposition ? h("div", { class: "trans faint" }, `🔗 ${w.preposition}`) : null,
     w.notes ? h("div", { class: "trans faint" }, `📝 ${w.notes}`) : null,
   ]);
 
@@ -356,6 +359,9 @@ function openWordForm(initial) {
     es: initial?.es || "",
     notes: initial?.notes || "",
     isVerb: initial?.isVerb || false,
+    isNoun: initial?.isNoun || false,
+    gender: initial?.gender || "",
+    preposition: initial?.preposition || "",
     categoryId: defaultCat,
   };
 
@@ -401,6 +407,9 @@ function openWordForm(initial) {
       es: state.es.trim(),
       notes: state.notes.trim(),
       isVerb: state.isVerb,
+      isNoun: state.isNoun,
+      gender: state.isNoun ? state.gender : "",
+      preposition: state.isVerb ? state.preposition.trim() : "",
       categoryId: state.categoryId,
     };
     if (initial) {
@@ -415,6 +424,81 @@ function openWordForm(initial) {
 
   const canConj = hasConjugation(m.id);
   const canTranslate = isTranslatable(m.id);
+  const hasGender = m.id === "french" || m.id === "portuguese"; // idiomas con género gramatical
+
+  // --- Controles extra que aparecen/desaparecen según el tipo marcado ---
+  const extraHost = h("div");
+
+  const genderSelect = h(
+    "select",
+    { onchange: (e) => (state.gender = e.target.value) },
+    [
+      h("option", { value: "", selected: !state.gender }, "— elegir —"),
+      h("option", { value: "m", selected: state.gender === "m" }, m.id === "french" ? "Masculino (le)" : "Masculino (o)"),
+      h("option", { value: "f", selected: state.gender === "f" }, m.id === "french" ? "Femenino (la)" : "Femenino (a)"),
+    ]
+  );
+  const prepInput = h("input", {
+    value: state.preposition,
+    placeholder: "ej. à  ·  de  ·  à/de = jugar/tocar",
+    oninput: (e) => (state.preposition = e.target.value),
+  });
+
+  function renderExtra() {
+    clear(extraHost);
+    if (state.isNoun && hasGender) {
+      extraHost.appendChild(
+        h("div", { style: { marginBottom: "12px" } }, [
+          h("label", {}, "Género del sustantivo"),
+          genderSelect,
+        ])
+      );
+    }
+    if (state.isVerb) {
+      extraHost.appendChild(
+        h("div", { style: { marginBottom: "12px" } }, [
+          h("label", {}, "Preposición que rige (opcional)"),
+          prepInput,
+          h("div", { class: "muted", style: { fontSize: "12px", marginTop: "4px" } }, "Puedes poner varias con su significado, ej. “à = jugar / de = tocar”."),
+        ])
+      );
+    }
+  }
+  renderExtra();
+
+  // checkboxes de tipo (verbo / sustantivo)
+  const verbCheck = h("input", {
+    type: "checkbox",
+    checked: state.isVerb,
+    onchange: (e) => {
+      state.isVerb = e.target.checked;
+      if (e.target.checked) { state.isNoun = false; nounCheck.checked = false; }
+      renderExtra();
+    },
+  });
+  const nounCheck = h("input", {
+    type: "checkbox",
+    checked: state.isNoun,
+    onchange: (e) => {
+      state.isNoun = e.target.checked;
+      if (e.target.checked) { state.isVerb = false; verbCheck.checked = false; }
+      renderExtra();
+    },
+  });
+
+  // Envolvemos checkbox + texto en un <label> para que al tocar el texto
+  // (importante en móvil) también se marque la casilla.
+  const typeControls = [];
+  if (canConj) {
+    typeControls.push(
+      h("label", { class: "checkbox-row", style: { margin: 0, cursor: "pointer" } }, [verbCheck, h("span", {}, "Es un verbo (conjugar)")])
+    );
+  }
+  if (hasGender) {
+    typeControls.push(
+      h("label", { class: "checkbox-row", style: { marginTop: "6px", cursor: "pointer" } }, [nounCheck, h("span", {}, "Es un sustantivo (género)")])
+    );
+  }
 
   const content = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() }, [
     h("h2", {}, initial ? "Editar palabra" : "Añadir palabra"),
@@ -431,16 +515,9 @@ function openWordForm(initial) {
         h("label", {}, "Categoría"),
         h("select", { onchange: (e) => (state.categoryId = e.target.value) }, ls.categories.map((c) => h("option", { value: c.id, selected: c.id === state.categoryId }, c.name))),
       ]),
-      canConj
-        ? h("div", {}, [
-            h("label", {}, "Tipo"),
-            h("div", { class: "checkbox-row", style: { paddingTop: "8px" } }, [
-              h("input", { type: "checkbox", checked: state.isVerb, onchange: (e) => (state.isVerb = e.target.checked) }),
-              h("label", { style: { margin: 0 } }, "Es un verbo (conjugar automáticamente)"),
-            ]),
-          ])
-        : null,
+      typeControls.length ? h("div", {}, [h("label", {}, "Tipo"), ...typeControls]) : null,
     ]),
+    extraHost,
     h("div", { style: { marginBottom: "4px" } }, [
       h("label", {}, "Notas / comentarios (opcional)"),
       h("textarea", { rows: "2", placeholder: "algún recordatorio, frase de ejemplo, comentario…", oninput: (e) => (state.notes = e.target.value) }, state.notes),
@@ -614,12 +691,15 @@ function renderQuiz() {
 
   if (!quizSession) {
     const canConj = hasConjugation(m.id);
-    // Opciones de tipo de quiz (conjugación solo si el idioma la soporta).
+    const hasGender = m.id === "french" || m.id === "portuguese";
+    // Opciones de tipo de quiz (según lo que soporte el idioma).
     const types = [
-      { id: "mixed", label: "🎲 Mixto", desc: "Traducciones y conjugaciones mezcladas" },
+      { id: "mixed", label: "🎲 Mixto", desc: "Todo mezclado" },
       { id: "translation", label: "🌐 Traducción", desc: "Solo palabra ↔ inglés/español" },
     ];
     if (canConj) types.push({ id: "conjugation", label: "📖 Conjugación", desc: "Solo conjugar verbos en tus tiempos activos" });
+    if (hasGender) types.push({ id: "gender", label: "🚺🚹 Género", desc: "¿El sustantivo es masculino o femenino?" });
+    if (canConj) types.push({ id: "preposition", label: "🔗 Preposición", desc: "¿Qué preposición rige el verbo?" });
 
     let chosenType = "mixed";
     const cards = types.map((t) =>
@@ -649,6 +729,10 @@ function renderQuiz() {
                   ? "Para el quiz de conjugación necesitas verbos marcados como tales y al menos un tiempo activo (pestaña Conjugación)."
                   : chosenType === "translation"
                   ? "Necesitas palabras con traducción en inglés o español."
+                  : chosenType === "gender"
+                  ? "Necesitas sustantivos marcados con su género (le/la). Marca “Es un sustantivo” y elige el género al añadir la palabra."
+                  : chosenType === "preposition"
+                  ? "Necesitas verbos con una preposición escrita. Al añadir un verbo, rellena el campo “Preposición que rige”."
                   : "Estas palabras aún no se pueden preguntar. Añade traducciones o activa un tiempo verbal.";
               alert(msg);
               return;

@@ -63,10 +63,12 @@ function pick(arr) {
 const LANG_NAME_ES = { french: "francés", english: "inglés", portuguese: "portugués", japanese: "japonés" };
 
 // Build a single question object from a word.
-// mode: "mixed" | "translation" | "conjugation"
+// mode: "mixed" | "translation" | "conjugation" | "gender" | "preposition"
 export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   const conj = CONJUGATORS[languageId];
   const canConjugate = word.isVerb && conj && activeTenses && activeTenses.length > 0;
+  const hasGender = word.isNoun && (word.gender === "m" || word.gender === "f");
+  const hasPrep = word.isVerb && word.preposition && word.preposition.trim();
 
   const transKinds = [];
   if (word.en) transKinds.push("term_to_en", "en_to_term");
@@ -77,15 +79,48 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
     if (canConjugate) kinds = ["conjugation"];
   } else if (mode === "translation") {
     kinds = transKinds;
+  } else if (mode === "gender") {
+    if (hasGender) kinds = ["gender"];
+  } else if (mode === "preposition") {
+    if (hasPrep) kinds = ["preposition"];
   } else {
-    // mixto: traducciones + conjugación (con un poco más de peso) si aplica
+    // mixto: traducciones + conjugación + género + preposición (con pesos)
     kinds = [...transKinds];
     if (canConjugate) kinds.push("conjugation", "conjugation");
+    if (hasGender) kinds.push("gender");
+    if (hasPrep) kinds.push("preposition");
   }
 
   if (kinds.length === 0) return null;
   const kind = pick(kinds);
   const langEs = LANG_NAME_ES[languageId] || languageId;
+
+  if (kind === "gender") {
+    const art = languageId === "french" ? { m: "le", f: "la" } : { m: "o", f: "a" };
+    const answer = word.gender === "m" ? "masculino" : "femenino";
+    return {
+      wordId: word.id,
+      kind,
+      prompt: `¿“${word.term}” es masculino o femenino?`,
+      hint: "Responde: masculino / femenino (o el artículo)",
+      answer: `${answer} (${art[word.gender]} ${word.term})`,
+      // aceptamos varias formas: masculino/femenino, m/f, le/la/o/a
+      accept: word.gender === "m"
+        ? [normalize("masculino"), "m", normalize(art.m)]
+        : [normalize("femenino"), "f", normalize(art.f)],
+    };
+  }
+
+  if (kind === "preposition") {
+    return {
+      wordId: word.id,
+      kind,
+      prompt: `¿Qué preposición rige “${word.term}”?`,
+      hint: "Escribe la preposición (ej. à, de…)",
+      answer: word.preposition,
+      accept: splitAnswers(word.preposition).map(normalize),
+    };
+  }
 
   if (kind === "conjugation") {
     const tenseId = pick(activeTenses);
@@ -124,13 +159,19 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
 // mode: "mixed" | "translation" | "conjugation"
 export function buildQuiz(words, languageId, activeTenses, count = 10, mode = "mixed") {
   if (!words.length) return [];
-  // Para quiz de conjugación, solo tiene sentido usar verbos conjugables.
+  // Filtrar el conjunto de palabras según el tipo de quiz.
   let pool = words;
   if (mode === "conjugation") {
     pool = words.filter((w) => w.isVerb);
     if (!pool.length || !activeTenses || activeTenses.length === 0) return [];
   } else if (mode === "translation") {
     pool = words.filter((w) => w.en || w.es);
+    if (!pool.length) return [];
+  } else if (mode === "gender") {
+    pool = words.filter((w) => w.isNoun && (w.gender === "m" || w.gender === "f"));
+    if (!pool.length) return [];
+  } else if (mode === "preposition") {
+    pool = words.filter((w) => w.isVerb && w.preposition && w.preposition.trim());
     if (!pool.length) return [];
   }
 

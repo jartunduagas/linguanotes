@@ -128,6 +128,9 @@ function normalizeWord(w) {
     en: w.en || "",
     es: w.es || "",
     isVerb: Boolean(w.isVerb),
+    isNoun: Boolean(w.isNoun),       // sustantivo (para el quiz de género)
+    gender: w.gender || "",          // "m" | "f" | "" (le / la)
+    preposition: w.preposition || "", // preposición que rige el verbo (quiz de preposición)
     conjOverrides: w.conjOverrides || {},
     notes: w.notes || "",
     stats: {
