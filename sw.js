@@ -6,7 +6,7 @@
 //   - Sirve los archivos desde la caché (rápido y offline).
 //   - Si hay internet, descarga la versión nueva por detrás para la próxima vez.
 
-const CACHE = "linguanotes-v3";
+const CACHE = "linguanotes-v4";
 
 // Rutas relativas para que funcione tanto en https://usuario.github.io/linguanotes/
 // como en la raíz de cualquier servidor.

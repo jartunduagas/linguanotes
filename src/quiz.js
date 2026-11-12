@@ -101,27 +101,34 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
     return {
       wordId: word.id,
       kind,
+      choice: true,
       prompt: `¿“${word.term}” es masculino o femenino?`,
-      hint: "Responde: masculino / femenino (o el artículo)",
+      hint: "Toca la opción correcta",
       answer: `${answer} (${art[word.gender]} ${word.term})`,
-      // aceptamos varias formas: masculino/femenino, m/f, le/la/o/a
+      options: [`Masculino (${art.m})`, `Femenino (${art.f})`],
+      // la opción correcta completa (lo que el botón envía)
+      correctOption: word.gender === "m" ? `Masculino (${art.m})` : `Femenino (${art.f})`,
+      // seguimos aceptando texto por compatibilidad
       accept: word.gender === "m"
-        ? [normalize("masculino"), "m", normalize(art.m)]
-        : [normalize("femenino"), "f", normalize(art.f)],
+        ? [normalize("masculino"), "m", normalize(art.m), normalize(`Masculino (${art.m})`)]
+        : [normalize("femenino"), "f", normalize(art.f), normalize(`Femenino (${art.f})`)],
     };
   }
 
   if (kind === "preposition") {
     const parsed = parsePrepositions(word.preposition);
-    // Se acepta CUALQUIERA de las preposiciones (sin el significado).
-    const accept = parsed.preps.map(normalize);
+    const correct = parsed.preps;             // puede haber más de una correcta
+    const accept = correct.map(normalize);
+    // Opción múltiple: preposición(es) correcta(s) + distractores comunes.
+    const options = buildPrepOptions(correct);
     return {
       wordId: word.id,
       kind,
+      choice: true, // marca que es de opción múltiple
       prompt: `¿Qué preposición rige “${word.term}”?`,
-      hint: parsed.preps.length > 1 ? "Escribe una de las preposiciones (ej. à, de…)" : "Escribe la preposición (ej. à, de…)",
-      // Como respuesta mostramos el texto completo (con significados) para que aprendas.
-      answer: word.preposition,
+      hint: correct.length > 1 ? "Rige varias — toca una correcta" : "Toca la preposición correcta",
+      answer: word.preposition, // texto completo con significados (al revelar)
+      options,
       accept,
     };
   }
@@ -225,6 +232,34 @@ export function parsePrepositions(raw) {
     if (prep) preps.push(prep);
   }
   return { preps: preps.length ? preps : [text] };
+}
+
+// Preposiciones francesas más comunes, para usar como distractores.
+const COMMON_PREPS = ["à", "de", "en", "dans", "pour", "avec", "sur", "sous", "par", "sans", "chez", "vers"];
+
+// Construye 4 opciones de respuesta para el quiz de preposición:
+// incluye la(s) correcta(s) + distractores aleatorios de la lista común.
+export function buildPrepOptions(correctPreps) {
+  const set = new Set();
+  // mostramos como mucho 1 de las correctas como "la" opción correcta visible
+  const correct = correctPreps[0] || "";
+  set.add(correct);
+  // añadir el resto de correctas también (para que tocar cualquiera valga)
+  for (const c of correctPreps) set.add(c);
+  const pool = COMMON_PREPS.filter((p) => ![...set].map((x) => x.toLowerCase()).includes(p.toLowerCase()));
+  // barajar distractores
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  while (set.size < 4 && pool.length) set.add(pool.shift());
+  const options = [...set];
+  // barajar opciones finales
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+  return options;
 }
 
 function capitalize(s) {

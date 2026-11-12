@@ -768,22 +768,9 @@ function renderQuizRunner() {
   }
 
   const progress = (s.idx / s.questions.length) * 100;
-  const answerInput = h("input", {
-    value: s.answer,
-    placeholder: "Escribe tu respuesta…",
-    disabled: s.state !== "idle",
-    style: { marginTop: "16px", textAlign: "center", fontSize: "18px" },
-    oninput: (e) => (s.answer = e.target.value),
-    onkeydown: (e) => {
-      if (e.key === "Enter") submit();
-    },
-  });
 
-  function submit() {
-    if (s.state !== "idle") return next();
-    const correct = isCorrect(q, s.answer);
+  function recordResult(correct) {
     s.state = correct ? "correct" : "wrong";
-    // registrar en stats de la palabra
     const w = langState().words.find((x) => x.id === q.wordId);
     if (w) {
       w.stats.seen += 1;
@@ -794,6 +781,11 @@ function renderQuizRunner() {
     }
     if (correct) s.correct += 1;
     else s.wrong += 1;
+  }
+
+  function submit() {
+    if (s.state !== "idle") return next();
+    recordResult(isCorrect(q, s.answer));
     render();
   }
   function next() {
@@ -804,12 +796,51 @@ function renderQuizRunner() {
     render();
   }
 
+  // --- Cuerpo de la pregunta: opción múltiple (botones) o texto abierto ---
+  let answerArea;
+  if (q.choice && Array.isArray(q.options)) {
+    // botones de opción
+    const optionButtons = q.options.map((opt) => {
+      let cls = "option";
+      if (s.state !== "idle") {
+        const optCorrect = isCorrect(q, opt);
+        if (optCorrect) cls += " correct";
+        else if (s.answer === opt) cls += " wrong";
+      }
+      return h("button", {
+        class: cls,
+        disabled: s.state !== "idle",
+        onclick: () => {
+          if (s.state !== "idle") return;
+          s.answer = opt;
+          recordResult(isCorrect(q, opt));
+          render();
+        },
+      }, opt);
+    });
+    answerArea = h("div", { class: "options", style: { marginTop: "16px" } }, optionButtons);
+  } else {
+    // input de texto abierto (traducción, conjugación)
+    const answerInput = h("input", {
+      value: s.answer,
+      placeholder: "Escribe tu respuesta…",
+      disabled: s.state !== "idle",
+      style: { marginTop: "16px", textAlign: "center", fontSize: "18px" },
+      oninput: (e) => (s.answer = e.target.value),
+      onkeydown: (e) => {
+        if (e.key === "Enter") submit();
+      },
+    });
+    answerArea = answerInput;
+    if (s.state === "idle") setTimeout(() => answerInput.focus(), 0);
+  }
+
   const card = h("div", { class: "card quiz-card" }, [
     h("div", { class: "quiz-progress" }, `Pregunta ${s.idx + 1} de ${s.questions.length}`),
     h("div", { class: "quiz-bar" }, [h("div", { style: { width: progress + "%" } })]),
     h("div", { class: "quiz-prompt" }, q.prompt),
     q.hint ? h("div", { class: "muted" }, q.hint) : null,
-    answerInput,
+    answerArea,
     s.state !== "idle"
       ? h("div", { class: "feedback " + (s.state === "correct" ? "good" : "bad") }, [
           document.createTextNode(s.state === "correct" ? "✓ ¡Correcto!" : "✗ Casi."),
@@ -817,13 +848,14 @@ function renderQuizRunner() {
         ])
       : null,
     h("div", { class: "inline", style: { justifyContent: "center", marginTop: "18px" } }, [
+      // En opción múltiple no hace falta "Comprobar" (tocar ya responde);
+      // solo mostramos el botón de avanzar tras responder.
       s.state === "idle"
-        ? h("button", { class: "btn primary", onclick: submit }, "Comprobar")
+        ? (q.choice ? null : h("button", { class: "btn primary", onclick: submit }, "Comprobar"))
         : h("button", { class: "btn primary", onclick: next }, s.idx + 1 >= s.questions.length ? "Terminar" : "Siguiente →"),
     ]),
   ]);
 
-  if (s.state === "idle") setTimeout(() => answerInput.focus(), 0);
   return card;
 }
 
