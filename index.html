@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <meta name="theme-color" content="#171419" />
+    <title>LinguaNotes — your language notes, organized</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <!-- React + Babel from CDN: this lets the app run in any modern browser with no build step.
+         Needs internet the first time so these scripts can download. -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body>
+    <div id="root">
+      <div style="padding: 60px 20px; text-align: center; font-family: system-ui; color: #a89fb0">
+        Loading LinguaNotes…
+        <br /><br />
+        <span style="font-size: 13px">
+          If this stays here, your browser needs an internet connection the first time to load
+          React. After that your notes are stored locally.
+        </span>
+      </div>
+    </div>
+    <!-- type="text/babel" + data-type=module lets us use JSX and ES module imports in the browser -->
+    <script type="text/babel" data-type="module" data-presets="react" src="./src/app.jsx"></script>
+  </body>
+</html>
