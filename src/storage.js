@@ -52,6 +52,71 @@ function freshLanguageState() {
   };
 }
 
+// Categoría especial donde viven las reglas/excepciones (solo francés).
+export const RULES_CATEGORY = { id: "rules", name: "Reglas y excepciones" };
+
+// Reglas por defecto del francés (chuletas editables). IDs fijos para no duplicar.
+function defaultFrenchRules() {
+  return [
+    {
+      id: "rule_maison",
+      categoryId: "rules",
+      isRule: true,
+      term: "🏠 Verbos de la maison (auxiliar être)",
+      ruleBody:
+        "Estos verbos forman el passé composé con ÊTRE (no avoir), y el participio concuerda con el sujeto " +
+        "(il est allé / elle est allée / ils sont allés).\n\n" +
+        "Regla mnemotécnica «DR & MRS VANDERTRAMP»:\n" +
+        "Devenir, Revenir, Monter, Rester, Sortir, Venir, Aller, Naître, Descendre, Entrer, " +
+        "Rentrer, Tomber, Retourner, Arriver, Mourir, Partir.\n\n" +
+        "También todos los verbos PRONOMINALES (se laver, se lever…) usan être.\n\n" +
+        "Ej.: Je suis allé(e) · Elle est venue · Ils sont partis · Nous nous sommes levé(e)s.",
+      en: "",
+      es: "",
+      notes: "",
+    },
+    {
+      id: "rule_subj",
+      categoryId: "rules",
+      isRule: true,
+      term: "✨ Irregulares del subjuntivo (présent)",
+      ruleBody:
+        "Verbos con radical irregular en el subjonctif présent (que je…):\n\n" +
+        "• être → que je sois, tu sois, il soit, nous soyons, vous soyez, ils soient\n" +
+        "• avoir → que j'aie, tu aies, il ait, nous ayons, vous ayez, ils aient\n" +
+        "• faire → que je fasse… (fass-)\n" +
+        "• aller → que j'aille / nous allions (doble radical)\n" +
+        "• pouvoir → que je puisse… (puiss-)\n" +
+        "• savoir → que je sache… (sach-)\n" +
+        "• vouloir → que je veuille / nous voulions\n" +
+        "• falloir → qu'il faille · pleuvoir → qu'il pleuve.",
+      en: "",
+      es: "",
+      notes: "",
+    },
+    {
+      id: "rule_futur",
+      categoryId: "rules",
+      isRule: true,
+      term: "⏩ Irregulares del futuro (radicales)",
+      ruleBody:
+        "El futur simple y el conditionnel usan el MISMO radical irregular (+ terminaciones -ai, -as, -a…):\n\n" +
+        "• être → ser- (je serai)\n" +
+        "• avoir → aur- (j'aurai)\n" +
+        "• aller → ir- (j'irai)\n" +
+        "• faire → fer- (je ferai)\n" +
+        "• pouvoir → pourr- (je pourrai)\n" +
+        "• vouloir → voudr- (je voudrai)\n" +
+        "• venir → viendr- (je viendrai)\n" +
+        "• voir → verr- · savoir → saur- · devoir → devr-\n" +
+        "• falloir → faudr- (il faudra) · pleuvoir → pleuvr- (il pleuvra).",
+      en: "",
+      es: "",
+      notes: "",
+    },
+  ];
+}
+
 function defaultData() {
   const languages = {};
   for (const l of LANGUAGES) languages[l.id] = freshLanguageState();
@@ -59,6 +124,9 @@ function defaultData() {
   languages.french.activeTenses = ["present", "passe_compose"];
   languages.english.activeTenses = ["present", "past"];
   languages.portuguese.activeTenses = ["presente", "preterito"];
+  // El francés incluye la categoría de Reglas + 3 chuletas por defecto.
+  languages.french.categories.push({ ...RULES_CATEGORY });
+  languages.french.words.push(...defaultFrenchRules().map(normalizeWord));
   return {
     version: 1,
     settings: { activeLanguage: "french" },
@@ -117,6 +185,19 @@ function migrate(data) {
       activeTenses: Array.isArray(incoming.activeTenses) ? incoming.activeTenses : base.languages[l.id].activeTenses,
     };
   }
+
+  // Asegurar que el francés tenga la categoría de Reglas y las 3 chuletas por defecto,
+  // sin duplicar ni borrar las que el usuario haya editado/creado.
+  const fr = out.languages.french;
+  if (fr) {
+    if (!fr.categories.some((c) => c.id === RULES_CATEGORY.id)) {
+      fr.categories.push({ ...RULES_CATEGORY });
+    }
+    const existingIds = new Set(fr.words.map((w) => w.id));
+    for (const rule of defaultFrenchRules()) {
+      if (!existingIds.has(rule.id)) fr.words.push(normalizeWord(rule));
+    }
+  }
   return out;
 }
 
@@ -131,6 +212,8 @@ function normalizeWord(w) {
     isNoun: Boolean(w.isNoun),       // sustantivo (para el quiz de género)
     gender: w.gender || "",          // "m" | "f" | "" (le / la)
     preposition: w.preposition || "", // preposición que rige el verbo (quiz de preposición)
+    isRule: Boolean(w.isRule),       // es una "chuleta"/regla (apartado de Reglas)
+    ruleBody: w.ruleBody || "",      // texto de la regla (cuando isRule)
     conjOverrides: w.conjOverrides || {},
     notes: w.notes || "",
     stats: {

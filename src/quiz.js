@@ -118,18 +118,21 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   if (kind === "preposition") {
     const parsed = parsePrepositions(word.preposition);
     const correct = parsed.preps;             // puede haber más de una correcta
-    const accept = correct.map(normalize);
-    // Opción múltiple: preposición(es) correcta(s) + distractores comunes.
+    // Opción múltiple con SELECCIÓN MANUAL: debes marcar exactamente las correctas.
     const options = buildPrepOptions(correct);
     return {
       wordId: word.id,
       kind,
-      choice: true, // marca que es de opción múltiple
+      choice: true,
+      multi: true, // hay que marcar una o varias y luego "Comprobar"
       prompt: `¿Qué preposición rige “${word.term}”?`,
-      hint: correct.length > 1 ? "Rige varias — toca una correcta" : "Toca la preposición correcta",
+      hint:
+        correct.length > 1
+          ? `Rige varias (${correct.length}). Marca todas las correctas y pulsa Comprobar.`
+          : "Marca la preposición correcta y pulsa Comprobar.",
       answer: word.preposition, // texto completo con significados (al revelar)
       options,
-      accept,
+      correctSet: correct.map(normalize), // conjunto exacto a acertar
     };
   }
 
@@ -267,5 +270,15 @@ function capitalize(s) {
 }
 
 export function isCorrect(question, userAnswer) {
-  return question.accept.includes(normalize(userAnswer));
+  return (question.accept || []).includes(normalize(userAnswer));
+}
+
+// Para preguntas de selección múltiple (preposiciones): acierta solo si el conjunto
+// marcado coincide EXACTAMENTE con el conjunto correcto.
+export function isMultiCorrect(question, selectedOptions) {
+  const sel = new Set((selectedOptions || []).map(normalize));
+  const correct = new Set(question.correctSet || []);
+  if (sel.size !== correct.size) return false;
+  for (const c of correct) if (!sel.has(c)) return false;
+  return true;
 }

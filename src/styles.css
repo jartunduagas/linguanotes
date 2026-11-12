@@ -182,6 +182,7 @@ label { font-size: 13px; color: var(--text-dim); display: block; margin-bottom: 
   transition: all 0.12s;
 }
 .option:hover { border-color: var(--crimson-soft); }
+.option.selected { background: var(--crimson-dim); border-color: var(--crimson); color: var(--crimson-soft); font-weight: 600; }
 .option.correct { background: rgba(63,185,126,0.18); border-color: var(--good); color: var(--good); }
 .option.wrong { background: rgba(229,96,77,0.18); border-color: var(--bad); color: var(--bad); }
 
@@ -259,3 +260,22 @@ label { font-size: 13px; color: var(--text-dim); display: block; margin-bottom: 
   background: var(--crimson-dim);
 }
 .quiz-type-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+
+/* ---- Tarjetas de Reglas / excepciones ---- */
+.rule-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--crimson);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.rule-head { display: flex; align-items: flex-start; gap: 10px; }
+.rule-title { flex: 1; font-size: 16px; font-weight: 700; color: var(--text); }
+.rule-body {
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap; /* respeta los saltos de línea del texto */
+}

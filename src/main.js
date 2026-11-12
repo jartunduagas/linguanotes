@@ -4,7 +4,7 @@
 import { storage, LANGUAGES, makeWord, genId } from "./storage.js";
 import { CONJUGATORS, hasConjugation } from "./conjugation.js";
 import { KANA_SETS } from "./kana.js";
-import { buildQuiz, isCorrect } from "./quiz.js";
+import { buildQuiz, isCorrect, isMultiCorrect, normalize } from "./quiz.js";
 import {
   buildKanaQuestion,
   loadKanaProgress,
@@ -54,23 +54,28 @@ function render() {
   const container = h("div", { class: "app" });
   if (currentTab === "notes") container.appendChild(renderNotes());
   else if (currentTab === "conjugation" && !isJapanese()) container.appendChild(renderConjugation());
+  else if (currentTab === "rules" && lang() === "french") container.appendChild(renderRules());
   else if (currentTab === "kana" && isJapanese()) container.appendChild(renderKana());
   else if (currentTab === "quiz") container.appendChild(renderQuiz());
   root.appendChild(container);
 }
 
 function tabsFor() {
-  return isJapanese()
-    ? [
-        { id: "notes", label: "Notas" },
-        { id: "kana", label: "Escritura y lectura" },
-        { id: "quiz", label: "Quiz" },
-      ]
-    : [
-        { id: "notes", label: "Notas" },
-        { id: "conjugation", label: "Conjugación" },
-        { id: "quiz", label: "Quiz" },
-      ];
+  if (isJapanese()) {
+    return [
+      { id: "notes", label: "Notas" },
+      { id: "kana", label: "Escritura y lectura" },
+      { id: "quiz", label: "Quiz" },
+    ];
+  }
+  const tabs = [
+    { id: "notes", label: "Notas" },
+    { id: "conjugation", label: "Conjugación" },
+  ];
+  // Pestaña de Reglas solo para francés.
+  if (lang() === "french") tabs.push({ id: "rules", label: "📌 Reglas" });
+  tabs.push({ id: "quiz", label: "Quiz" });
+  return tabs;
 }
 
 function renderTopbar() {
@@ -256,6 +261,28 @@ function renderNotesList() {
 function renderWordRow(w) {
   const m = langMeta();
   const ls = langState();
+
+  // Las REGLAS se muestran como una tarjeta con título + texto (no como palabra).
+  if (w.isRule) {
+    return h("div", { class: "rule-card" }, [
+      h("div", { class: "rule-head" }, [
+        h("div", { class: "rule-title" }, w.term || "Regla"),
+        h("div", { class: "actions" }, [
+          h("button", { class: "btn small", onclick: () => openRuleForm(w) }, "Editar"),
+          h("button", {
+            class: "btn small danger",
+            onclick: () => {
+              langState().words = langState().words.filter((x) => x.id !== w.id);
+              save();
+              render();
+            },
+          }, "Borrar"),
+        ]),
+      ]),
+      h("div", { class: "rule-body" }, w.ruleBody || ""),
+    ]);
+  }
+
   const canConj = w.isVerb && hasConjugation(m.id) && ls.activeTenses.length > 0;
 
   const genderArticle = w.gender === "m" ? (m.id === "french" ? "le" : "o") : w.gender === "f" ? (m.id === "french" ? "la" : "a") : "";
@@ -532,6 +559,64 @@ function openWordForm(initial) {
   setTimeout(() => termInput.focus(), 0);
 }
 
+/* ---- Formulario de REGLA / excepción (modal) ---- */
+
+function openRuleForm(initial) {
+  const ls = langState();
+  const defaultCat =
+    initial?.categoryId ||
+    (selectedCategory && selectedCategory !== "__u" ? selectedCategory : null) ||
+    "rules";
+  const state = {
+    term: initial?.term || "",
+    ruleBody: initial?.ruleBody || "",
+    categoryId: defaultCat,
+  };
+
+  const titleInput = h("input", {
+    value: state.term,
+    placeholder: "Título de la regla (ej. Verbos de la maison)",
+    oninput: (e) => (state.term = e.target.value),
+  });
+  const bodyInput = h("textarea", {
+    rows: "8",
+    placeholder: "Escribe aquí la explicación, ejemplos, etc.",
+    oninput: (e) => (state.ruleBody = e.target.value),
+  }, state.ruleBody);
+
+  function submit() {
+    if (!state.term.trim()) return;
+    const payload = {
+      term: state.term.trim(),
+      ruleBody: state.ruleBody,
+      categoryId: state.categoryId,
+      isRule: true,
+    };
+    if (initial) Object.assign(initial, payload);
+    else ls.words.push(makeWord(payload));
+    save();
+    close();
+    render();
+  }
+
+  const content = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() }, [
+    h("h2", {}, initial ? "Editar regla" : "Nueva regla / excepción"),
+    h("div", { style: { marginBottom: "12px" } }, [h("label", {}, "Título"), titleInput]),
+    h("div", { style: { marginBottom: "12px" } }, [h("label", {}, "Contenido"), bodyInput]),
+    h("div", { style: { marginBottom: "4px" } }, [
+      h("label", {}, "Categoría"),
+      h("select", { onchange: (e) => (state.categoryId = e.target.value) }, ls.categories.map((c) => h("option", { value: c.id, selected: c.id === state.categoryId }, c.name))),
+    ]),
+    h("div", { class: "modal-actions" }, [
+      h("button", { class: "btn ghost", onclick: () => close() }, "Cancelar"),
+      h("button", { class: "btn primary", onclick: submit }, initial ? "Guardar cambios" : "Crear regla"),
+    ]),
+  ]);
+
+  const close = openModal(content, () => close());
+  setTimeout(() => titleInput.focus(), 0);
+}
+
 /* ---- Gestor de categorías (modal) ---- */
 
 function openCategories() {
@@ -678,6 +763,31 @@ function sampleVerb(id) {
   return { french: "parler", english: "to speak", portuguese: "falar" }[id] || "";
 }
 
+/* ===================== Reglas / excepciones (solo francés) ===================== */
+
+function renderRules() {
+  const ls = langState();
+  const wrap = h("div");
+
+  wrap.appendChild(
+    h("div", { class: "toolbar" }, [
+      h("div", { class: "grow" }, [
+        h("div", { class: "section-title" }, "Reglas y excepciones"),
+        h("p", { class: "muted", style: { margin: 0 } }, "Tus chuletas de francés. Puedes editarlas o crear las tuyas."),
+      ]),
+      h("button", { class: "btn primary", onclick: () => openRuleForm(null) }, "+ Nueva regla"),
+    ])
+  );
+
+  const rules = ls.words.filter((w) => w.isRule);
+  if (!rules.length) {
+    wrap.appendChild(h("div", { class: "empty" }, "No hay reglas todavía. Pulsa “+ Nueva regla” para crear una chuleta."));
+    return wrap;
+  }
+  rules.forEach((r) => wrap.appendChild(renderWordRow(r)));
+  return wrap;
+}
+
 /* ===================== Quiz ===================== */
 
 function renderQuiz() {
@@ -788,23 +898,56 @@ function renderQuizRunner() {
     recordResult(isCorrect(q, s.answer));
     render();
   }
+  function submitMulti() {
+    if (s.state !== "idle") return next();
+    if (!s.selected || s.selected.length === 0) return; // exige marcar al menos una
+    recordResult(isMultiCorrect(q, s.selected));
+    render();
+  }
   function next() {
     s.idx += 1;
     s.state = "idle";
     s.answer = "";
+    s.selected = [];
     if (s.idx >= s.questions.length) s.done = true;
     render();
   }
 
   // --- Cuerpo de la pregunta: opción múltiple (botones) o texto abierto ---
   let answerArea;
-  if (q.choice && Array.isArray(q.options)) {
-    // botones de opción
+  if (q.choice && q.multi && Array.isArray(q.options)) {
+    // SELECCIÓN MÚLTIPLE MANUAL (preposiciones): marcar varias + Comprobar.
+    s.selected = s.selected || [];
+    const optCorrect = (opt) => (q.correctSet || []).includes(normalize(opt));
+    const optionButtons = q.options.map((opt) => {
+      const isSel = s.selected.includes(opt);
+      let cls = "option";
+      if (s.state !== "idle") {
+        // al corregir: verde las correctas; rojo las que marqué mal
+        if (optCorrect(opt)) cls += " correct";
+        else if (isSel) cls += " wrong";
+      } else if (isSel) {
+        cls += " selected";
+      }
+      return h("button", {
+        class: cls,
+        disabled: s.state !== "idle",
+        onclick: () => {
+          if (s.state !== "idle") return;
+          const i = s.selected.indexOf(opt);
+          if (i >= 0) s.selected.splice(i, 1);
+          else s.selected.push(opt);
+          render();
+        },
+      }, opt);
+    });
+    answerArea = h("div", { class: "options", style: { marginTop: "16px" } }, optionButtons);
+  } else if (q.choice && Array.isArray(q.options)) {
+    // SELECCIÓN SIMPLE (género): tocar resuelve al instante.
     const optionButtons = q.options.map((opt) => {
       let cls = "option";
       if (s.state !== "idle") {
-        const optCorrect = isCorrect(q, opt);
-        if (optCorrect) cls += " correct";
+        if (isCorrect(q, opt)) cls += " correct";
         else if (s.answer === opt) cls += " wrong";
       }
       return h("button", {
@@ -848,10 +991,15 @@ function renderQuizRunner() {
         ])
       : null,
     h("div", { class: "inline", style: { justifyContent: "center", marginTop: "18px" } }, [
-      // En opción múltiple no hace falta "Comprobar" (tocar ya responde);
-      // solo mostramos el botón de avanzar tras responder.
+      // - Selección múltiple (multi): botón "Comprobar" tras marcar.
+      // - Selección simple de botones (género): tocar ya responde, no hay "Comprobar".
+      // - Texto abierto: botón "Comprobar".
       s.state === "idle"
-        ? (q.choice ? null : h("button", { class: "btn primary", onclick: submit }, "Comprobar"))
+        ? q.multi
+          ? h("button", { class: "btn primary", onclick: submitMulti, disabled: !(s.selected && s.selected.length) }, "Comprobar")
+          : q.choice
+          ? null
+          : h("button", { class: "btn primary", onclick: submit }, "Comprobar")
         : h("button", { class: "btn primary", onclick: next }, s.idx + 1 >= s.questions.length ? "Terminar" : "Siguiente →"),
     ]),
   ]);
