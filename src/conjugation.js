@@ -24,11 +24,22 @@ const FR_PERSONS = [
 ];
 
 const FR_TENSES = [
+  // Tiempos simples
   { id: "present", label: "Présent" },
   { id: "imparfait", label: "Imparfait" },
   { id: "futur", label: "Futur simple" },
-  { id: "conditionnel", label: "Conditionnel" },
+  { id: "conditionnel", label: "Conditionnel présent" },
+  { id: "subjonctif", label: "Subjonctif présent" },
+  { id: "passe_simple", label: "Passé simple" },
+  { id: "imperatif", label: "Impératif" },
+  // Tiempos compuestos (auxiliar + participio)
   { id: "passe_compose", label: "Passé composé" },
+  { id: "plus_que_parfait", label: "Plus-que-parfait" },
+  { id: "futur_anterieur", label: "Futur antérieur" },
+  { id: "conditionnel_passe", label: "Conditionnel passé" },
+  { id: "subjonctif_passe", label: "Subjonctif passé" },
+  // Formas no personales
+  { id: "participe_present", label: "Participe présent / Gérondif" },
 ];
 
 // A small table of common irregular French verbs (présent + key stems).
@@ -36,6 +47,8 @@ const FR_IRREGULAR = {
   être: {
     present: { je: "suis", tu: "es", il: "est", nous: "sommes", vous: "êtes", ils: "sont" },
     imparfait: { je: "étais", tu: "étais", il: "était", nous: "étions", vous: "étiez", ils: "étaient" },
+    subjonctif: { je: "sois", tu: "sois", il: "soit", nous: "soyons", vous: "soyez", ils: "soient" },
+    passe_simple: { je: "fus", tu: "fus", il: "fut", nous: "fûmes", vous: "fûtes", ils: "furent" },
     futurStem: "ser",
     participle: "été",
     aux: "avoir",
@@ -43,18 +56,24 @@ const FR_IRREGULAR = {
   avoir: {
     present: { je: "ai", tu: "as", il: "a", nous: "avons", vous: "avez", ils: "ont" },
     imparfait: { je: "avais", tu: "avais", il: "avait", nous: "avions", vous: "aviez", ils: "avaient" },
+    subjonctif: { je: "aie", tu: "aies", il: "ait", nous: "ayons", vous: "ayez", ils: "aient" },
+    passe_simple: { je: "eus", tu: "eus", il: "eut", nous: "eûmes", vous: "eûtes", ils: "eurent" },
     futurStem: "aur",
     participle: "eu",
     aux: "avoir",
   },
   aller: {
     present: { je: "vais", tu: "vas", il: "va", nous: "allons", vous: "allez", ils: "vont" },
+    subjonctif: { je: "aille", tu: "ailles", il: "aille", nous: "allions", vous: "alliez", ils: "aillent" },
+    passe_simple: { je: "allai", tu: "allas", il: "alla", nous: "allâmes", vous: "allâtes", ils: "allèrent" },
     futurStem: "ir",
     participle: "allé",
     aux: "être",
   },
   faire: {
     present: { je: "fais", tu: "fais", il: "fait", nous: "faisons", vous: "faites", ils: "font" },
+    subjonctif: { je: "fasse", tu: "fasses", il: "fasse", nous: "fassions", vous: "fassiez", ils: "fassent" },
+    passe_simple: { je: "fis", tu: "fis", il: "fit", nous: "fîmes", vous: "fîtes", ils: "firent" },
     futurStem: "fer",
     participle: "fait",
     aux: "avoir",
@@ -104,21 +123,66 @@ function frElides(form) {
   // je -> j' before a vowel or mute h
   return /^[aeiouâêîôûéèh]/i.test(form);
 }
+const frApplyJe = (form) => (frElides(form) ? `j'${form}` : `je ${form}`);
+
+// Tablas de los auxiliares (se reutilizan en todos los tiempos compuestos).
+const FR_AUX = {
+  avoir: {
+    present: { je: "ai", tu: "as", il: "a", nous: "avons", vous: "avez", ils: "ont" },
+    imparfait: { je: "avais", tu: "avais", il: "avait", nous: "avions", vous: "aviez", ils: "avaient" },
+    futur: { je: "aurai", tu: "auras", il: "aura", nous: "aurons", vous: "aurez", ils: "auront" },
+    conditionnel: { je: "aurais", tu: "aurais", il: "aurait", nous: "aurions", vous: "auriez", ils: "auraient" },
+    subjonctif: { je: "aie", tu: "aies", il: "ait", nous: "ayons", vous: "ayez", ils: "aient" },
+  },
+  être: {
+    present: { je: "suis", tu: "es", il: "est", nous: "sommes", vous: "êtes", ils: "sont" },
+    imparfait: { je: "étais", tu: "étais", il: "était", nous: "étions", vous: "étiez", ils: "étaient" },
+    futur: { je: "serai", tu: "seras", il: "sera", nous: "serons", vous: "serez", ils: "seront" },
+    conditionnel: { je: "serais", tu: "serais", il: "serait", nous: "serions", vous: "seriez", ils: "seraient" },
+    subjonctif: { je: "sois", tu: "sois", il: "soit", nous: "soyons", vous: "soyez", ils: "soient" },
+  },
+};
+
+function frParticiple(verb, irr, group, stem) {
+  if (irr && irr.participle) return irr.participle;
+  if (group === "er") return stem + "é";
+  if (group === "ir") return stem + "i";
+  if (group === "re") return stem + "u";
+  return verb;
+}
+
+function frAuxName(irr, group) {
+  return irr && irr.aux ? irr.aux : "avoir";
+}
+
+// Construye un tiempo compuesto: auxiliar (en el tiempo indicado) + participio.
+function frCompound(auxTenseId, auxName, participle) {
+  const table = FR_AUX[auxName][auxTenseId];
+  const out = {};
+  for (const p of FR_PERSONS) {
+    const a = table[p.id];
+    const head = p.id === "je" ? frApplyJe(a) : `${pronounFr(p.id)} ${a}`;
+    out[p.id] = `${head} ${participle}`.trim();
+  }
+  return out;
+}
 
 function frConjugate(verbRaw, tenseId) {
   const verb = (verbRaw || "").trim().toLowerCase();
   const irr = FR_IRREGULAR[verb];
   const out = {};
 
-  // Determine regular group + stem
+  // Grupo regular + raíz
   const group = verb.endsWith("er") ? "er" : verb.endsWith("ir") ? "ir" : verb.endsWith("re") ? "re" : null;
   const stem = group ? verb.slice(0, -2) : verb;
 
   const futurBase =
     (irr && irr.futurStem) ||
-    (group === "re" ? verb.slice(0, -1) : verb); // -re drops final e for futur/cond
+    (group === "re" ? verb.slice(0, -1) : verb); // -re pierde la 'e' final en futur/cond
 
-  const applyJe = (form) => (frElides(form) ? `j'${form}` : `je ${form}`);
+  const applyJe = frApplyJe;
+  const auxName = frAuxName(irr, group);
+  const participle = frParticiple(verb, irr, group, stem);
 
   switch (tenseId) {
     case "present": {
@@ -143,7 +207,6 @@ function frConjugate(verbRaw, tenseId) {
     }
     case "imparfait": {
       if (irr && irr.imparfait) return { ...irr.imparfait, je: applyJe(irr.imparfait.je) };
-      // imparfait stem = nous-present minus -ons; approximate from group
       let impStem;
       if (group === "er") impStem = stem;
       else if (group === "ir") impStem = stem + "iss";
@@ -170,25 +233,77 @@ function frConjugate(verbRaw, tenseId) {
       }
       return out;
     }
-    case "passe_compose": {
-      const aux = irr ? irr.aux : group === "er" ? "avoir" : "avoir";
-      let participle = irr && irr.participle;
-      if (!participle) {
-        if (group === "er") participle = stem + "é";
-        else if (group === "ir") participle = stem + "i";
-        else if (group === "re") participle = stem + "u";
-        else participle = verb;
+    case "subjonctif": {
+      if (irr && irr.subjonctif) {
+        const t = irr.subjonctif;
+        const r = {};
+        for (const p of FR_PERSONS) r[p.id] = frQue(p.id, t[p.id]);
+        return r;
       }
-      const avoir = { je: "ai", tu: "as", il: "a", nous: "avons", vous: "avez", ils: "ont" };
-      const etre = { je: "suis", tu: "es", il: "est", nous: "sommes", vous: "êtes", ils: "sont" };
-      const auxTable = aux === "être" ? etre : avoir;
+      let subStem;
+      if (group === "er") subStem = stem;
+      else if (group === "ir") subStem = stem + "iss";
+      else if (group === "re") subStem = stem;
+      else subStem = verb;
+      const end = { je: "e", tu: "es", il: "e", nous: "ions", vous: "iez", ils: "ent" };
       for (const p of FR_PERSONS) {
-        const a = auxTable[p.id];
-        // "je" elides before a vowel (j'ai); every other person uses "pronoun aux participle".
-        const head = p.id === "je" ? applyJe(a) : `${pronounFr(p.id)} ${a}`;
-        out[p.id] = `${head} ${participle}`.trim();
+        out[p.id] = frQue(p.id, subStem + end[p.id]);
       }
       return out;
+    }
+    case "passe_simple": {
+      if (irr && irr.passe_simple) return { ...irr.passe_simple, je: applyJe(irr.passe_simple.je) };
+      let end;
+      if (group === "er") end = { je: "ai", tu: "as", il: "a", nous: "âmes", vous: "âtes", ils: "èrent" };
+      else end = { je: "is", tu: "is", il: "it", nous: "îmes", vous: "îtes", ils: "irent" }; // -ir/-re regulares
+      for (const p of FR_PERSONS) {
+        const form = stem + end[p.id];
+        out[p.id] = p.id === "je" ? applyJe(form) : form;
+      }
+      return out;
+    }
+    case "imperatif": {
+      // Solo tu / nous / vous
+      const pres = frConjugate(verb, "present");
+      // quitar el pronombre que añadimos en 'present'
+      const bare = (id) => (pres[id] || "").replace(/^(j'|je |tu |il |nous |vous |ils )/, "");
+      let tuForm = bare("tu");
+      if (group === "er" && tuForm.endsWith("es")) tuForm = tuForm.slice(0, -1); // parle (no parles)
+      return {
+        je: "—",
+        tu: tuForm,
+        il: "—",
+        nous: bare("nous"),
+        vous: bare("vous"),
+        ils: "—",
+      };
+    }
+    case "participe_present": {
+      // gérondif = en + participe présent; raíz como el imparfait
+      let base;
+      if (group === "er") base = stem;
+      else if (group === "ir") base = stem + "iss";
+      else if (group === "re") base = stem;
+      else base = verb;
+      const pp = base + "ant";
+      return { je: `en ${pp}`, tu: pp, il: pp, nous: pp, vous: pp, ils: pp };
+    }
+    case "passe_compose":
+      return frCompound("present", auxName, participle);
+    case "plus_que_parfait":
+      return frCompound("imparfait", auxName, participle);
+    case "futur_anterieur":
+      return frCompound("futur", auxName, participle);
+    case "conditionnel_passe":
+      return frCompound("conditionnel", auxName, participle);
+    case "subjonctif_passe": {
+      // auxiliar en subjonctif + participio, con "que/qu'" delante.
+      const auxTable = FR_AUX[auxName].subjonctif;
+      const r = {};
+      for (const p of FR_PERSONS) {
+        r[p.id] = frQue(p.id, `${auxTable[p.id]} ${participle}`);
+      }
+      return r;
     }
     default:
       return out;
@@ -197,6 +312,17 @@ function frConjugate(verbRaw, tenseId) {
 
 function pronounFr(id) {
   return { je: "je", tu: "tu", il: "il", nous: "nous", vous: "vous", ils: "ils" }[id];
+}
+
+// Construye "que je parle" / "qu'il aille" con las contracciones correctas.
+function frQue(personId, form) {
+  const pron = pronounFr(personId);
+  if (personId === "je") {
+    return frElides(form) ? `que j'${form}` : `que je ${form}`;
+  }
+  // que + il/ils -> qu'il ; que + elle no aplica aquí (usamos il/ils)
+  if (personId === "il" || personId === "ils") return `qu'${pron} ${form}`;
+  return `que ${pron} ${form}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -216,8 +342,15 @@ const EN_TENSES = [
   { id: "present", label: "Present simple" },
   { id: "present_cont", label: "Present continuous" },
   { id: "past", label: "Past simple" },
+  { id: "past_cont", label: "Past continuous" },
   { id: "future", label: "Future (will)" },
+  { id: "future_going", label: "Future (going to)" },
   { id: "present_perfect", label: "Present perfect" },
+  { id: "present_perfect_cont", label: "Present perfect continuous" },
+  { id: "past_perfect", label: "Past perfect" },
+  { id: "future_perfect", label: "Future perfect" },
+  { id: "conditional", label: "Conditional (would)" },
+  { id: "conditional_perfect", label: "Conditional perfect" },
 ];
 
 const EN_IRREGULAR = {
@@ -233,6 +366,20 @@ const EN_IRREGULAR = {
   know: { past: "knew", pp: "known", ing: "knowing" },
   eat: { past: "ate", pp: "eaten", ing: "eating" },
   write: { past: "wrote", pp: "written", ing: "writing" },
+  speak: { past: "spoke", pp: "spoken", ing: "speaking" },
+  say: { he3: "says", past: "said", pp: "said", ing: "saying" },
+  give: { past: "gave", pp: "given", ing: "giving" },
+  find: { past: "found", pp: "found", ing: "finding" },
+  think: { past: "thought", pp: "thought", ing: "thinking" },
+  tell: { past: "told", pp: "told", ing: "telling" },
+  become: { past: "became", pp: "become", ing: "becoming" },
+  leave: { past: "left", pp: "left", ing: "leaving" },
+  feel: { past: "felt", pp: "felt", ing: "feeling" },
+  bring: { past: "brought", pp: "brought", ing: "bringing" },
+  begin: { past: "began", pp: "begun", ing: "beginning" },
+  run: { past: "ran", pp: "run", ing: "running" },
+  read: { past: "read", pp: "read", ing: "reading" },
+  put: { past: "put", pp: "put", ing: "putting" },
 };
 
 function enThirdPerson(verb) {
@@ -290,13 +437,44 @@ function enConjugate(verbRaw, tenseId) {
       }
       return out;
     }
+    case "past_cont": {
+      const wasT = { i: "was", you: "were", he: "was", we: "were", youpl: "were", they: "were" };
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} ${wasT[p.id]} ${enIng(verb)}`;
+      return out;
+    }
     case "future": {
       for (const p of EN_PERSONS) out[p.id] = `${p.label} will ${verb}`;
+      return out;
+    }
+    case "future_going": {
+      const beT = { i: "am", you: "are", he: "is", we: "are", youpl: "are", they: "are" };
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} ${beT[p.id]} going to ${verb}`;
       return out;
     }
     case "present_perfect": {
       const haveT = { i: "have", you: "have", he: "has", we: "have", youpl: "have", they: "have" };
       for (const p of EN_PERSONS) out[p.id] = `${p.label} ${haveT[p.id]} ${enPP(verb)}`;
+      return out;
+    }
+    case "present_perfect_cont": {
+      const haveT = { i: "have", you: "have", he: "has", we: "have", youpl: "have", they: "have" };
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} ${haveT[p.id]} been ${enIng(verb)}`;
+      return out;
+    }
+    case "past_perfect": {
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} had ${enPP(verb)}`;
+      return out;
+    }
+    case "future_perfect": {
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} will have ${enPP(verb)}`;
+      return out;
+    }
+    case "conditional": {
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} would ${verb}`;
+      return out;
+    }
+    case "conditional_perfect": {
+      for (const p of EN_PERSONS) out[p.id] = `${p.label} would have ${enPP(verb)}`;
       return out;
     }
     default:
@@ -321,7 +499,14 @@ const PT_TENSES = [
   { id: "presente", label: "Presente" },
   { id: "preterito", label: "Pretérito perfeito" },
   { id: "imperfeito", label: "Pretérito imperfeito" },
-  { id: "futuro", label: "Futuro" },
+  { id: "mais_que_perfeito", label: "Pretérito mais-que-perfeito" },
+  { id: "futuro", label: "Futuro do presente" },
+  { id: "futuro_preterito", label: "Futuro do pretérito (condicional)" },
+  { id: "presente_subjuntivo", label: "Presente do subjuntivo" },
+  { id: "imperfeito_subjuntivo", label: "Imperfeito do subjuntivo" },
+  { id: "imperativo", label: "Imperativo" },
+  { id: "gerundio", label: "Gerúndio" },
+  { id: "participio", label: "Particípio" },
 ];
 
 const PT_IRREGULAR = {
@@ -362,17 +547,59 @@ function ptConjugate(verbRaw, tenseId) {
     for (const p of PT_PERSONS) out[p.id] = verb;
     return out;
   }
+
+  // Formas no personales
+  if (tenseId === "gerundio") {
+    const g = stem + (group === "ar" ? "ando" : group === "er" ? "endo" : "indo");
+    for (const p of PT_PERSONS) out[p.id] = g;
+    return out;
+  }
+  if (tenseId === "participio") {
+    const pp = stem + (group === "ar" ? "ado" : "ido");
+    for (const p of PT_PERSONS) out[p.id] = pp;
+    return out;
+  }
+
+  // Futuros (sobre el infinitivo completo)
   if (tenseId === "futuro") {
     const end = { eu: "ei", tu: "ás", ele: "á", nos: "emos", vos: "eis", eles: "ão" };
     for (const p of PT_PERSONS) out[p.id] = verb + end[p.id];
     return out;
   }
-  const table = PT_ENDINGS[group][tenseId];
+  if (tenseId === "futuro_preterito") {
+    const end = { eu: "ia", tu: "ias", ele: "ia", nos: "íamos", vos: "íeis", eles: "iam" };
+    for (const p of PT_PERSONS) out[p.id] = verb + end[p.id];
+    return out;
+  }
+
+  // Tiempos sobre la raíz
+  const extra = {
+    ar: {
+      mais_que_perfeito: { eu: "ara", tu: "aras", ele: "ara", nos: "áramos", vos: "áreis", eles: "aram" },
+      presente_subjuntivo: { eu: "e", tu: "es", ele: "e", nos: "emos", vos: "eis", eles: "em" },
+      imperfeito_subjuntivo: { eu: "asse", tu: "asses", ele: "asse", nos: "ássemos", vos: "ásseis", eles: "assem" },
+      imperativo: { eu: "—", tu: "a", ele: "e", nos: "emos", vos: "ai", eles: "em" },
+    },
+    er: {
+      mais_que_perfeito: { eu: "era", tu: "eras", ele: "era", nos: "êramos", vos: "êreis", eles: "eram" },
+      presente_subjuntivo: { eu: "a", tu: "as", ele: "a", nos: "amos", vos: "ais", eles: "am" },
+      imperfeito_subjuntivo: { eu: "esse", tu: "esses", ele: "esse", nos: "êssemos", vos: "êsseis", eles: "essem" },
+      imperativo: { eu: "—", tu: "e", ele: "a", nos: "amos", vos: "ei", eles: "am" },
+    },
+    ir: {
+      mais_que_perfeito: { eu: "ira", tu: "iras", ele: "ira", nos: "íramos", vos: "íreis", eles: "iram" },
+      presente_subjuntivo: { eu: "a", tu: "as", ele: "a", nos: "amos", vos: "ais", eles: "am" },
+      imperfeito_subjuntivo: { eu: "isse", tu: "isses", ele: "isse", nos: "íssemos", vos: "ísseis", eles: "issem" },
+      imperativo: { eu: "—", tu: "e", ele: "a", nos: "amos", vos: "i", eles: "am" },
+    },
+  };
+
+  let table = (PT_ENDINGS[group] && PT_ENDINGS[group][tenseId]) || (extra[group] && extra[group][tenseId]);
   if (!table) {
     for (const p of PT_PERSONS) out[p.id] = verb;
     return out;
   }
-  for (const p of PT_PERSONS) out[p.id] = stem + table[p.id];
+  for (const p of PT_PERSONS) out[p.id] = table[p.id] === "—" ? "—" : stem + table[p.id];
   return out;
 }
 

@@ -211,3 +211,50 @@ label { font-size: 13px; color: var(--text-dim); display: block; margin-bottom: 
   .kana-prompt { font-size: 60px; }
   .stat .num { font-size: 22px; }
 }
+
+/* ---- Navegación por categorías (tarjetas) ---- */
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.cat-card {
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: var(--shadow);
+}
+.cat-card:hover {
+  border-color: var(--crimson);
+  transform: translateY(-2px);
+}
+.cat-card-name { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.cat-card-count { font-size: 13px; color: var(--crimson-soft); }
+
+/* ---- Selector de tipo de quiz ---- */
+.quiz-type-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 8px;
+  text-align: left;
+}
+.quiz-type {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.quiz-type:hover { border-color: var(--crimson-soft); }
+.quiz-type.on {
+  border-color: var(--crimson);
+  background: var(--crimson-dim);
+}
+.quiz-type-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }

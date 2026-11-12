@@ -60,23 +60,32 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Build a single question object from a word, choosing a random valid direction.
-export function buildQuestion(word, languageId, activeTenses) {
-  const kinds = [];
-  if (word.en) kinds.push("term_to_en");
-  if (word.es) kinds.push("term_to_es");
-  if (word.en) kinds.push("en_to_term");
-  if (word.es) kinds.push("es_to_term");
+const LANG_NAME_ES = { french: "francés", english: "inglés", portuguese: "portugués", japanese: "japonés" };
 
+// Build a single question object from a word.
+// mode: "mixed" | "translation" | "conjugation"
+export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   const conj = CONJUGATORS[languageId];
   const canConjugate = word.isVerb && conj && activeTenses && activeTenses.length > 0;
-  if (canConjugate) {
-    // Weight conjugation a bit so it shows up for verbs.
-    kinds.push("conjugation", "conjugation");
+
+  const transKinds = [];
+  if (word.en) transKinds.push("term_to_en", "en_to_term");
+  if (word.es) transKinds.push("term_to_es", "es_to_term");
+
+  let kinds = [];
+  if (mode === "conjugation") {
+    if (canConjugate) kinds = ["conjugation"];
+  } else if (mode === "translation") {
+    kinds = transKinds;
+  } else {
+    // mixto: traducciones + conjugación (con un poco más de peso) si aplica
+    kinds = [...transKinds];
+    if (canConjugate) kinds.push("conjugation", "conjugation");
   }
 
   if (kinds.length === 0) return null;
   const kind = pick(kinds);
+  const langEs = LANG_NAME_ES[languageId] || languageId;
 
   if (kind === "conjugation") {
     const tenseId = pick(activeTenses);
@@ -87,18 +96,18 @@ export function buildQuestion(word, languageId, activeTenses) {
     return {
       wordId: word.id,
       kind,
-      prompt: `Conjugate “${word.term}” — ${tense.label}, ${person.label}`,
-      hint: "Type the full conjugated form",
+      prompt: `Conjuga “${word.term}” — ${tense.label}, ${person.label}`,
+      hint: "Escribe la forma conjugada completa",
       answer,
       accept: [normalize(answer)],
     };
   }
 
   const map = {
-    term_to_en: { prompt: `“${word.term}” → English?`, answer: word.en },
-    term_to_es: { prompt: `“${word.term}” → Spanish?`, answer: word.es },
-    en_to_term: { prompt: `English “${word.en}” → ${capitalize(languageId)}?`, answer: word.term },
-    es_to_term: { prompt: `Spanish “${word.es}” → ${capitalize(languageId)}?`, answer: word.term },
+    term_to_en: { prompt: `“${word.term}” → ¿Inglés?`, answer: word.en },
+    term_to_es: { prompt: `“${word.term}” → ¿Español?`, answer: word.es },
+    en_to_term: { prompt: `Inglés “${word.en}” → ¿${capitalize(langEs)}?`, answer: word.term },
+    es_to_term: { prompt: `Español “${word.es}” → ¿${capitalize(langEs)}?`, answer: word.term },
   };
   const q = map[kind];
   return {
@@ -112,15 +121,25 @@ export function buildQuestion(word, languageId, activeTenses) {
 }
 
 // Build a quiz session of N questions from the given words.
-export function buildQuiz(words, languageId, activeTenses, count = 10) {
+// mode: "mixed" | "translation" | "conjugation"
+export function buildQuiz(words, languageId, activeTenses, count = 10, mode = "mixed") {
   if (!words.length) return [];
-  const sampled = weightedSample(words, Math.min(count, words.length));
-  // If fewer words than count, allow repeats to reach the target length.
+  // Para quiz de conjugación, solo tiene sentido usar verbos conjugables.
+  let pool = words;
+  if (mode === "conjugation") {
+    pool = words.filter((w) => w.isVerb);
+    if (!pool.length || !activeTenses || activeTenses.length === 0) return [];
+  } else if (mode === "translation") {
+    pool = words.filter((w) => w.en || w.es);
+    if (!pool.length) return [];
+  }
+
+  const sampled = weightedSample(pool, Math.min(count, pool.length));
   const questions = [];
   let i = 0;
-  while (questions.length < Math.min(count, Math.max(words.length, count))) {
-    const w = sampled[i % sampled.length] || pick(words);
-    const q = buildQuestion(w, languageId, activeTenses);
+  while (questions.length < Math.min(count, Math.max(pool.length, count))) {
+    const w = sampled[i % sampled.length] || pick(pool);
+    const q = buildQuestion(w, languageId, activeTenses, mode);
     if (q) questions.push(q);
     i++;
     if (i > count * 4) break; // safety

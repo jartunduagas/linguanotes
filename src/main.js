@@ -12,12 +12,14 @@ import {
   recordKana,
 } from "./kanaQuiz.js";
 import { h, clear, openModal } from "./dom.js";
+import { autoTranslate, isTranslatable } from "./translate.js";
 
 /* ===================== Estado global ===================== */
 
 let data = storage.load();
 let currentTab = "notes";
 let search = "";
+let selectedCategory = null; // null = ver la lista de categorías; id = ver una categoría
 
 // Estado de sesión de quiz (null = no iniciado)
 let quizSession = null;
@@ -81,6 +83,7 @@ function renderTopbar() {
         save();
         if (!tabsFor().some((t) => t.id === currentTab)) currentTab = "notes";
         quizSession = null;
+        selectedCategory = null;
         render();
       },
     },
@@ -132,23 +135,20 @@ function renderTabs() {
 
 function renderNotes() {
   const wrap = h("div");
-  const ls = langState();
-  const m = langMeta();
 
   const toolbar = h("div", { class: "toolbar" }, [
     h("input", {
       class: "grow",
-      placeholder: "Busca en tus notas…",
+      placeholder: "Busca en todas tus notas…",
       value: search,
       oninput: (e) => {
         search = e.target.value;
-        // actualizar solo la lista para no perder foco
         const fresh = renderNotesList();
         listHost.replaceWith(fresh);
         listHost = fresh;
       },
     }),
-    h("button", { class: "btn", onclick: openCategories }, "Categorías"),
+    h("button", { class: "btn", onclick: openCategories }, "Gestionar categorías"),
     h("button", { class: "btn primary", onclick: () => openWordForm(null) }, "+ Añadir palabra"),
   ]);
   wrap.appendChild(toolbar);
@@ -171,38 +171,85 @@ function filteredWords() {
   });
 }
 
+function countInCategory(catId) {
+  const ls = langState();
+  const known = new Set(ls.categories.map((c) => c.id));
+  if (catId === "__u") return ls.words.filter((w) => !known.has(w.categoryId)).length;
+  return ls.words.filter((w) => w.categoryId === catId).length;
+}
+
 function renderNotesList() {
   const ls = langState();
   const m = langMeta();
   const host = h("div");
 
-  if (ls.words.length === 0) {
+  // --- Si hay búsqueda activa: resultados globales (todas las categorías) ---
+  if (search.trim()) {
+    const results = filteredWords();
+    if (!results.length) {
+      host.appendChild(h("div", { class: "empty" }, `Ninguna nota coincide con “${search}”. Prueba otra búsqueda.`));
+      return host;
+    }
+    host.appendChild(h("p", { class: "muted" }, `${results.length} resultado(s) para “${search}”`));
+    results.forEach((w) => host.appendChild(renderWordRow(w)));
+    return host;
+  }
+
+  // --- Vista de UNA categoría seleccionada: solo sus palabras ---
+  if (selectedCategory) {
+    const known = new Set(ls.categories.map((c) => c.id));
+    const cat = ls.categories.find((c) => c.id === selectedCategory) || { id: "__u", name: "Sin categoría" };
+    const items =
+      selectedCategory === "__u"
+        ? ls.words.filter((w) => !known.has(w.categoryId))
+        : ls.words.filter((w) => w.categoryId === selectedCategory);
+
     host.appendChild(
-      h("div", { class: "empty", html: `Aún no tienes notas en ${m.label}. Pulsa <b>“+ Añadir palabra”</b> para guardar tu primera palabra con sus traducciones en inglés y español.` })
+      h("div", { class: "cat-head", style: { marginBottom: "14px" } }, [
+        h("button", {
+          class: "btn ghost small",
+          onclick: () => {
+            selectedCategory = null;
+            render();
+          },
+        }, "← Categorías"),
+        h("h3", { style: { margin: 0 } }, cat.name),
+        h("span", { class: "badge" }, String(items.length)),
+      ])
     );
+
+    if (!items.length) {
+      host.appendChild(h("div", { class: "empty", html: `No hay palabras en <b>${esc(cat.name)}</b> todavía. Pulsa “+ Añadir palabra”.` }));
+    } else {
+      items.forEach((w) => host.appendChild(renderWordRow(w)));
+    }
     return host;
   }
 
-  const filtered = filteredWords();
+  // --- Vista principal: TARJETAS de categorías (entras a una para ver sus palabras) ---
+  host.appendChild(h("p", { class: "muted" }, "Elige una categoría para ver sus palabras:"));
+  const grid = h("div", { class: "cat-grid" });
   const known = new Set(ls.categories.map((c) => c.id));
-  const groups = ls.categories.map((c) => ({ cat: c, items: filtered.filter((w) => w.categoryId === c.id) }));
-  const orphans = filtered.filter((w) => !known.has(w.categoryId));
-  if (orphans.length) groups.push({ cat: { id: "__u", name: "Sin categoría" }, items: orphans });
+  const cats = [...ls.categories];
+  const orphanCount = ls.words.filter((w) => !known.has(w.categoryId)).length;
+  if (orphanCount) cats.push({ id: "__u", name: "Sin categoría" });
 
-  const anyVisible = groups.some((g) => g.items.length > 0);
-  if (!anyVisible) {
-    host.appendChild(h("div", { class: "empty" }, `Ninguna nota coincide con “${search}”. Prueba otra búsqueda.`));
-    return host;
+  for (const c of cats) {
+    const count = countInCategory(c.id);
+    grid.appendChild(
+      h("button", {
+        class: "cat-card",
+        onclick: () => {
+          selectedCategory = c.id;
+          render();
+        },
+      }, [
+        h("div", { class: "cat-card-name" }, c.name),
+        h("div", { class: "cat-card-count" }, `${count} palabra${count === 1 ? "" : "s"}`),
+      ])
+    );
   }
-
-  for (const g of groups) {
-    if (!g.items.length) continue;
-    const group = h("div", { class: "cat-group" }, [
-      h("div", { class: "cat-head" }, [h("h3", {}, g.cat.name), h("span", { class: "badge" }, String(g.items.length))]),
-      ...g.items.map((w) => renderWordRow(w)),
-    ]);
-    host.appendChild(group);
-  }
+  host.appendChild(grid);
   return host;
 }
 
@@ -297,13 +344,19 @@ function renderConjTable(w) {
 function openWordForm(initial) {
   const m = langMeta();
   const ls = langState();
+  // Al añadir desde dentro de una categoría, esa viene preseleccionada.
+  const defaultCat =
+    initial?.categoryId ||
+    (selectedCategory && selectedCategory !== "__u" ? selectedCategory : null) ||
+    ls.categories[0]?.id ||
+    "vocabulary";
   const state = {
     term: initial?.term || "",
     en: initial?.en || "",
     es: initial?.es || "",
     notes: initial?.notes || "",
     isVerb: initial?.isVerb || false,
-    categoryId: initial?.categoryId || ls.categories[0]?.id || "vocabulary",
+    categoryId: defaultCat,
   };
 
   const termInput = h("input", {
@@ -313,6 +366,31 @@ function openWordForm(initial) {
     onkeydown: (e) => {
       if (e.key === "Enter") submit();
     },
+  });
+
+  // Inputs de traducción (guardamos referencia para poder rellenarlos tras traducir).
+  const enInput = h("input", { value: state.en, placeholder: "to speak", oninput: (e) => (state.en = e.target.value) });
+  const esInput = h("input", { value: state.es, placeholder: "hablar", oninput: (e) => (state.es = e.target.value) });
+
+  // Botón de traducción automática (online).
+  const transStatus = h("span", { class: "muted", style: { fontSize: "12px" } }, "");
+  const translateBtn = h("button", { class: "btn small" }, "🌐 Traducir automáticamente");
+  translateBtn.addEventListener("click", async () => {
+    if (!state.term.trim()) {
+      transStatus.textContent = "Escribe primero la palabra.";
+      return;
+    }
+    translateBtn.disabled = true;
+    const prev = translateBtn.textContent;
+    translateBtn.textContent = "Traduciendo…";
+    transStatus.textContent = "";
+    const r = await autoTranslate(state.term, m.id);
+    if (r.en) { state.en = r.en; enInput.value = r.en; }
+    if (r.es) { state.es = r.es; esInput.value = r.es; }
+    transStatus.textContent = r.error ? "⚠️ " + r.error : "✓ Traducido (puedes corregirlo).";
+    transStatus.style.color = r.error ? "var(--bad)" : "var(--good)";
+    translateBtn.disabled = false;
+    translateBtn.textContent = prev;
   });
 
   function submit() {
@@ -336,13 +414,17 @@ function openWordForm(initial) {
   }
 
   const canConj = hasConjugation(m.id);
+  const canTranslate = isTranslatable(m.id);
 
   const content = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() }, [
     h("h2", {}, initial ? "Editar palabra" : "Añadir palabra"),
-    h("div", { style: { marginBottom: "12px" } }, [h("label", {}, `Palabra en ${m.label}`), termInput]),
+    h("div", { style: { marginBottom: "10px" } }, [h("label", {}, `Palabra en ${m.label}`), termInput]),
+    canTranslate
+      ? h("div", { class: "inline", style: { marginBottom: "12px", gap: "10px" } }, [translateBtn, transStatus])
+      : null,
     h("div", { class: "row", style: { marginBottom: "12px" } }, [
-      h("div", {}, [h("label", {}, "🇬🇧 Inglés"), h("input", { value: state.en, placeholder: "to speak", oninput: (e) => (state.en = e.target.value) })]),
-      h("div", {}, [h("label", {}, "🇪🇸 Español"), h("input", { value: state.es, placeholder: "hablar", oninput: (e) => (state.es = e.target.value) })]),
+      h("div", {}, [h("label", {}, "🇬🇧 Inglés"), enInput]),
+      h("div", {}, [h("label", {}, "🇪🇸 Español"), esInput]),
     ]),
     h("div", { class: "row", style: { marginBottom: "12px" } }, [
       h("div", {}, [
@@ -360,8 +442,8 @@ function openWordForm(initial) {
         : null,
     ]),
     h("div", { style: { marginBottom: "4px" } }, [
-      h("label", {}, "Notas (opcional)"),
-      h("textarea", { rows: "2", placeholder: "algún recordatorio, frase de ejemplo…", oninput: (e) => (state.notes = e.target.value) }, state.notes),
+      h("label", {}, "Notas / comentarios (opcional)"),
+      h("textarea", { rows: "2", placeholder: "algún recordatorio, frase de ejemplo, comentario…", oninput: (e) => (state.notes = e.target.value) }, state.notes),
     ]),
     h("div", { class: "modal-actions" }, [
       h("button", { class: "btn ghost", onclick: () => close() }, "Cancelar"),
@@ -531,19 +613,47 @@ function renderQuiz() {
   }
 
   if (!quizSession) {
+    const canConj = hasConjugation(m.id);
+    // Opciones de tipo de quiz (conjugación solo si el idioma la soporta).
+    const types = [
+      { id: "mixed", label: "🎲 Mixto", desc: "Traducciones y conjugaciones mezcladas" },
+      { id: "translation", label: "🌐 Traducción", desc: "Solo palabra ↔ inglés/español" },
+    ];
+    if (canConj) types.push({ id: "conjugation", label: "📖 Conjugación", desc: "Solo conjugar verbos en tus tiempos activos" });
+
+    let chosenType = "mixed";
+    const cards = types.map((t) =>
+      h("button", {
+        class: "quiz-type" + (t.id === chosenType ? " on" : ""),
+        onclick: (e) => {
+          chosenType = t.id;
+          // marcar visualmente
+          e.currentTarget.parentElement.querySelectorAll(".quiz-type").forEach((el) => el.classList.remove("on"));
+          e.currentTarget.classList.add("on");
+        },
+      }, [h("div", { class: "quiz-type-title" }, t.label), h("div", { class: "muted", style: { fontSize: "12px" } }, t.desc)])
+    );
+
     return h("div", { class: "card quiz-card" }, [
-      h("div", { class: "section-title" }, "¿List@ para practicar?"),
-      h("p", { class: "muted" }, `Las preguntas aparecen en direcciones aleatorias (palabra ↔ traducciones${hasConjugation(m.id) ? ", además de conjugaciones de verbos" : ""}). Las palabras nuevas y difíciles salen más.`),
-      h("div", { class: "inline", style: { justifyContent: "center", marginTop: "10px" } }, [
+      h("div", { class: "section-title" }, "¿Qué quieres practicar?"),
+      h("p", { class: "muted" }, "Elige el tipo de quiz. Las palabras nuevas y las que más fallas salen con más frecuencia."),
+      h("div", { class: "quiz-type-grid" }, cards),
+      h("div", { class: "inline", style: { justifyContent: "center", marginTop: "18px" } }, [
         h("button", {
           class: "btn primary",
           onclick: () => {
-            const questions = buildQuiz(words, m.id, ls.activeTenses, Math.min(10, Math.max(5, words.length)));
+            const questions = buildQuiz(words, m.id, ls.activeTenses, Math.min(10, Math.max(5, words.length)), chosenType);
             if (questions.length === 0) {
-              alert("Estas palabras aún no se pueden preguntar. Añade una traducción en inglés o español (o, para verbos, activa un tiempo en la pestaña Conjugación).");
+              const msg =
+                chosenType === "conjugation"
+                  ? "Para el quiz de conjugación necesitas verbos marcados como tales y al menos un tiempo activo (pestaña Conjugación)."
+                  : chosenType === "translation"
+                  ? "Necesitas palabras con traducción en inglés o español."
+                  : "Estas palabras aún no se pueden preguntar. Añade traducciones o activa un tiempo verbal.";
+              alert(msg);
               return;
             }
-            quizSession = { questions, idx: 0, correct: 0, wrong: 0, done: false, state: "idle", answer: "" };
+            quizSession = { questions, idx: 0, correct: 0, wrong: 0, done: false, state: "idle", answer: "", type: chosenType };
             render();
           },
         }, "Empezar quiz"),
