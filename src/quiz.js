@@ -112,13 +112,17 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   }
 
   if (kind === "preposition") {
+    const parsed = parsePrepositions(word.preposition);
+    // Se acepta CUALQUIERA de las preposiciones (sin el significado).
+    const accept = parsed.preps.map(normalize);
     return {
       wordId: word.id,
       kind,
       prompt: `¿Qué preposición rige “${word.term}”?`,
-      hint: "Escribe la preposición (ej. à, de…)",
+      hint: parsed.preps.length > 1 ? "Escribe una de las preposiciones (ej. à, de…)" : "Escribe la preposición (ej. à, de…)",
+      // Como respuesta mostramos el texto completo (con significados) para que aprendas.
       answer: word.preposition,
-      accept: splitAnswers(word.preposition).map(normalize),
+      accept,
     };
   }
 
@@ -202,6 +206,25 @@ export function normalize(str) {
 function splitAnswers(answer) {
   // Accept answers separated by "/", "," or ";" as alternatives.
   return (answer || "").split(/[\/,;]/).map((s) => s.trim()).filter(Boolean);
+}
+
+// Extrae las preposiciones de un campo que puede incluir significados.
+// Ejemplos:
+//   "à"                      -> { preps: ["à"] }
+//   "à = jugar / de = tocar" -> { preps: ["à", "de"] }
+//   "de (hablar de algo)"    -> { preps: ["de"] }
+export function parsePrepositions(raw) {
+  const text = (raw || "").trim();
+  if (!text) return { preps: [] };
+  // separar por / , ; para las distintas variantes
+  const parts = text.split(/[\/,;]/).map((s) => s.trim()).filter(Boolean);
+  const preps = [];
+  for (const part of parts) {
+    // tomar lo que va ANTES de "=", ":" o "(" (ahí suele ir el significado)
+    let prep = part.split(/[=:(]/)[0].trim();
+    if (prep) preps.push(prep);
+  }
+  return { preps: preps.length ? preps : [text] };
 }
 
 function capitalize(s) {
