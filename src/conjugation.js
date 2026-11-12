@@ -32,19 +32,15 @@ const FR_TENSES = [
   { id: "futur", label: "Indicatif · Futur simple" },
   { id: "passe_compose", label: "Indicatif · Passé composé" },
   { id: "plus_que_parfait", label: "Indicatif · Plus-que-parfait" },
-  { id: "passe_anterieur", label: "Indicatif · Passé antérieur" },
   { id: "futur_anterieur", label: "Indicatif · Futur antérieur" },
-  // SUBJONCTIF (4)
+  // SUBJONCTIF (2)
   { id: "subjonctif", label: "Subjonctif · Présent" },
   { id: "subjonctif_passe", label: "Subjonctif · Passé" },
-  { id: "subjonctif_imparfait", label: "Subjonctif · Imparfait (littéraire)" },
-  { id: "subjonctif_pqp", label: "Subjonctif · Plus-que-parfait (littéraire)" },
   // CONDITIONNEL (2)
   { id: "conditionnel", label: "Conditionnel · Présent" },
   { id: "conditionnel_passe", label: "Conditionnel · Passé" },
-  // IMPÉRATIF (2)
+  // IMPÉRATIF (1)
   { id: "imperatif", label: "Impératif · Présent" },
-  { id: "imperatif_passe", label: "Impératif · Passé" },
   // INFINITIF (2)
   { id: "infinitif", label: "Infinitif · Présent" },
   { id: "infinitif_passe", label: "Infinitif · Passé" },
@@ -145,10 +141,7 @@ const FR_AUX = {
     futur: { je: "aurai", tu: "auras", il: "aura", nous: "aurons", vous: "aurez", ils: "auront" },
     conditionnel: { je: "aurais", tu: "aurais", il: "aurait", nous: "aurions", vous: "auriez", ils: "auraient" },
     subjonctif: { je: "aie", tu: "aies", il: "ait", nous: "ayons", vous: "ayez", ils: "aient" },
-    passe_simple: { je: "eus", tu: "eus", il: "eut", nous: "eûmes", vous: "eûtes", ils: "eurent" },
-    subjonctif_imparfait: { je: "eusse", tu: "eusses", il: "eût", nous: "eussions", vous: "eussiez", ils: "eussent" },
     infinitif: "avoir",
-    imperatif: { tu: "aie", nous: "ayons", vous: "ayez" },
   },
   être: {
     present: { je: "suis", tu: "es", il: "est", nous: "sommes", vous: "êtes", ils: "sont" },
@@ -156,10 +149,7 @@ const FR_AUX = {
     futur: { je: "serai", tu: "seras", il: "sera", nous: "serons", vous: "serez", ils: "seront" },
     conditionnel: { je: "serais", tu: "serais", il: "serait", nous: "serions", vous: "seriez", ils: "seraient" },
     subjonctif: { je: "sois", tu: "sois", il: "soit", nous: "soyons", vous: "soyez", ils: "soient" },
-    passe_simple: { je: "fus", tu: "fus", il: "fut", nous: "fûmes", vous: "fûtes", ils: "furent" },
-    subjonctif_imparfait: { je: "fusse", tu: "fusses", il: "fût", nous: "fussions", vous: "fussiez", ils: "fussent" },
     infinitif: "être",
-    imperatif: { tu: "sois", nous: "soyons", vous: "soyez" },
   },
 };
 
@@ -325,49 +315,6 @@ function frConjugate(verbRaw, tenseId) {
         r[p.id] = frQue(p.id, `${auxTable[p.id]} ${participle}`);
       }
       return r;
-    }
-    case "passe_anterieur":
-      // auxiliar en passé simple + participio
-      return frCompound("passe_simple", auxName, participle);
-    case "subjonctif_imparfait": {
-      // littéraire: raíz del passé simple + terminaciones -sse, -sses, -^t...
-      if (irr && irr.subjonctif_imparfait) {
-        const t = irr.subjonctif_imparfait;
-        const r = {};
-        for (const p of FR_PERSONS) r[p.id] = frQue(p.id, t[p.id]);
-        return r;
-      }
-      // obtener la raíz a partir del passé simple (il + quitar terminación)
-      const ps = frConjugate(verb, "passe_simple");
-      // il parla -> parl ; il finit -> fin ; usamos la 1ª pers sing sin pronombre
-      let base = (ps.je || "").replace(/^(j'|je )/, "");
-      base = base.replace(/(ai|is|us|ins)$/, ""); // quitar vocal temática final aprox.
-      const end =
-        group === "er"
-          ? { je: "asse", tu: "asses", il: "ât", nous: "assions", vous: "assiez", ils: "assent" }
-          : { je: "isse", tu: "isses", il: "ît", nous: "issions", vous: "issiez", ils: "issent" };
-      for (const p of FR_PERSONS) out[p.id] = frQue(p.id, base + end[p.id]);
-      return out;
-    }
-    case "subjonctif_pqp":
-      // littéraire: auxiliar en subjonctif imparfait + participio
-      return (() => {
-        const auxTable = FR_AUX[auxName].subjonctif_imparfait;
-        const r = {};
-        for (const p of FR_PERSONS) r[p.id] = frQue(p.id, `${auxTable[p.id]} ${participle}`);
-        return r;
-      })();
-    case "imperatif_passe": {
-      // auxiliar en impératif + participio (solo tu/nous/vous)
-      const auxImp = FR_AUX[auxName].imperatif;
-      return {
-        je: "—",
-        tu: `${auxImp.tu} ${participle}`,
-        il: "—",
-        nous: `${auxImp.nous} ${participle}`,
-        vous: `${auxImp.vous} ${participle}`,
-        ils: "—",
-      };
     }
     case "infinitif": {
       // forma única (no personal): mostramos el infinitivo en todas las filas
