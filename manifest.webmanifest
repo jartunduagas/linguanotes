@@ -1,0 +1,20 @@
+{
+  "name": "LinguaNotes",
+  "short_name": "LinguaNotes",
+  "description": "Tus notas de idiomas, organizadas por categorías, con conjugaciones y quiz.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#171419",
+  "theme_color": "#dc143c",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
