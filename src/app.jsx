@@ -12,7 +12,7 @@ import {
   recordKana,
 } from "./kanaQuiz.js";
 
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useRef } = React;
 
 /* ============================ Root ============================ */
 
@@ -117,10 +117,12 @@ function App() {
         { id: "quiz", label: "Quiz" },
       ];
 
-  // If switching to a language without the current tab, reset to notes.
+  // If the current tab doesn't exist for this language (e.g. "kana" only exists for
+  // Japanese, "conjugation" only for the others), fall back to Notes.
+  const tabExists = tabs.some((t) => t.id === tab);
   useEffect(() => {
-    if (!tabs.find((t) => t.id === tab)) setTab("notes");
-  }, [activeLang]);
+    if (!tabExists) setTab("notes");
+  }, [tabExists]);
 
   return (
     <div className="app">
@@ -222,6 +224,16 @@ function NotesTab({
     items: filtered.filter((w) => w.categoryId === c.id),
   }));
 
+  // Safety net: any word whose category no longer exists still shows up here,
+  // so notes can never silently disappear from view.
+  const knownCatIds = new Set(langState.categories.map((c) => c.id));
+  const orphanItems = filtered.filter((w) => !knownCatIds.has(w.categoryId));
+  if (orphanItems.length) {
+    byCat.push({ cat: { id: "__uncategorized", name: "Uncategorized" }, items: orphanItems });
+  }
+
+  const hasVisibleResults = byCat.some(({ items }) => items.length > 0);
+
   return (
     <div>
       <div className="toolbar">
@@ -249,6 +261,12 @@ function NotesTab({
         <div className="empty">
           No notes yet for {langMeta.label}. Click <b>“+ Add word”</b> to save your first word
           with its English &amp; Spanish translations.
+        </div>
+      )}
+
+      {words.length > 0 && !hasVisibleResults && (
+        <div className="empty">
+          No notes match “{search}”. Try a different search.
         </div>
       )}
 
@@ -643,20 +661,22 @@ function QuizTab({ langMeta, langState, onRecordAnswer, isJapanese }) {
         <div className="inline" style={{ justifyContent: "center", marginTop: 10 }}>
           <button
             className="btn primary"
-            onClick={() =>
-              setSession({
-                questions: buildQuiz(
-                  words,
-                  langMeta.id,
-                  langState.activeTenses,
-                  Math.min(10, Math.max(5, words.length))
-                ),
-                idx: 0,
-                correct: 0,
-                wrong: 0,
-                done: false,
-              })
-            }
+            onClick={() => {
+              const questions = buildQuiz(
+                words,
+                langMeta.id,
+                langState.activeTenses,
+                Math.min(10, Math.max(5, words.length))
+              );
+              if (questions.length === 0) {
+                alert(
+                  "These words can't be quizzed yet. Add an English or Spanish translation " +
+                    "(or, for verbs, activate a tense in the Conjugation tab)."
+                );
+                return;
+              }
+              setSession({ questions, idx: 0, correct: 0, wrong: 0, done: false });
+            }}
           >
             Start quiz
           </button>
@@ -790,14 +810,23 @@ function KanaTab() {
   const [q, setQ] = useState(null);
   const [picked, setPicked] = useState(null);
   const [score, setScore] = useState({ correct: 0, wrong: 0 });
+  const timerRef = useRef(null);
+  // Keep the latest progress in a ref so the delayed next-question uses up-to-date weights.
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
 
   const newQuestion = () => {
     setPicked(null);
-    setQ(buildKanaQuestion(setKey, mode, progress));
+    setQ(buildKanaQuestion(setKey, mode, progressRef.current));
   };
 
+  // Start a fresh question when the alphabet/mode changes, and clean up any pending
+  // timer if the component unmounts (e.g. switching tabs) to avoid setting state late.
   useEffect(() => {
     newQuestion();
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [setKey, mode]);
 
   const answer = (opt) => {
@@ -808,7 +837,7 @@ function KanaTab() {
     setProgress(p);
     saveKanaProgress(p);
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), wrong: s.wrong + (correct ? 0 : 1) }));
-    setTimeout(newQuestion, 850);
+    timerRef.current = setTimeout(newQuestion, 850);
   };
 
   const learned = Object.values(progress).filter((s) => s.correct + s.wrong > 0).length;

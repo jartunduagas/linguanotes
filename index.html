@@ -7,10 +7,11 @@
     <title>LinguaNotes — your language notes, organized</title>
     <link rel="stylesheet" href="./src/styles.css" />
     <!-- React + Babel from CDN: this lets the app run in any modern browser with no build step.
-         Needs internet the first time so these scripts can download. -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+         Needs internet the first time so these scripts can download. Versions are pinned
+         so the app doesn't break if a CDN ships a new major release. -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
   </head>
   <body>
     <div id="root">
@@ -23,6 +24,31 @@
         </span>
       </div>
     </div>
+    <!-- Watchdog: if the CDN scripts didn't load (offline / blocked), show a clear message
+         instead of hanging forever on "Loading…". -->
+    <script>
+      window.addEventListener("DOMContentLoaded", function () {
+        setTimeout(function () {
+          var loaded = window.React && window.ReactDOM && window.Babel;
+          var rootHasApp = document.querySelector("#root .app");
+          if (!loaded || !rootHasApp) {
+            var root = document.getElementById("root");
+            if (root && !rootHasApp) {
+              root.innerHTML =
+                '<div style="max-width:520px;margin:60px auto;padding:24px;font-family:system-ui;' +
+                'color:#ece7ef;background:#221d25;border:1px solid #3a323f;border-radius:14px">' +
+                '<h2 style="margin-top:0;color:#e7506e">Couldn\u2019t start the app</h2>' +
+                "<p>LinguaNotes needs an internet connection the first time, to load React from a CDN.</p>" +
+                "<p style=\"color:#a89fb0;font-size:14px\">If you\u2019re online and still see this, the CDN " +
+                "(unpkg.com) may be blocked on your network. Try another network, or host the app " +
+                "yourself. Your saved notes are safe \u2014 they\u2019re stored in this browser.</p>" +
+                '<p style="color:#7d7385;font-size:13px">Also make sure you opened it via http:// ' +
+                "(e.g. <code>node serve.mjs</code>), not by double-clicking the file.</p></div>";
+            }
+          }
+        }, 6000);
+      });
+    </script>
     <!-- type="text/babel" + data-type=module lets us use JSX and ES module imports in the browser -->
     <script type="text/babel" data-type="module" data-presets="react" src="./src/app.jsx"></script>
   </body>
