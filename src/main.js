@@ -1840,8 +1840,10 @@ function renderLiveQuiz() {
     lq.boardTimer = setInterval(refreshBoard, 4000);
   }
 
-  // Zona de preguntas (host también puede jugar mientras tanto)
-  wrap.appendChild(renderLiveQuestion());
+  // Las preguntas solo las responde el ALUMNO. El profesor solo dirige y mira el progreso.
+  if (lq.role !== "host") {
+    wrap.appendChild(renderLiveQuestion());
+  }
   return wrap;
 }
 
@@ -1921,7 +1923,9 @@ function renderLiveRanking() {
   const lq = liveQuiz;
   const card = h("div", { class: "card quiz-card" }, [
     h("div", { class: "section-title" }, "🏆 Resultados"),
-    h("p", { class: "muted" }, `Tu resultado: ✓ ${lq.correct} aciertos · ✗ ${lq.wrong} fallos.`),
+    lq.role === "host"
+      ? h("p", { class: "muted" }, "Resultado final del grupo:")
+      : h("p", { class: "muted" }, `Tu resultado: ✓ ${lq.correct} aciertos · ✗ ${lq.wrong} fallos.`),
   ]);
   const listHost = h("div", {}, [h("p", { class: "muted" }, "Cargando ranking…")]);
   card.appendChild(listHost);
