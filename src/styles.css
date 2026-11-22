@@ -293,3 +293,25 @@ label { font-size: 13px; color: var(--text-dim); display: block; margin-bottom: 
   transition: all 0.12s;
 }
 .suggest-item:hover { border-color: var(--crimson); color: var(--crimson-soft); }
+
+/* ---- Ranking del quiz en vivo ---- */
+.podium { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.rank-row {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 14px;
+}
+.rank-row .rank-medal { font-size: 18px; min-width: 32px; text-align: center; color: var(--text-dim); font-weight: 700; }
+.rank-row .rank-name { flex: 1; text-align: left; }
+.rank-row .rank-score { font-weight: 700; color: var(--crimson-soft); }
+/* top 3: más grandes y resaltados */
+.rank-row.top {
+  background: var(--crimson-dim);
+  border-color: var(--crimson);
+  padding: 16px 18px;
+}
+.rank-row.top .rank-medal { font-size: 28px; }
+.rank-row.top .rank-name { font-size: 18px; font-weight: 700; }
+.rank-row.top .rank-score { font-size: 18px; }
+/* tu propia fila: borde para destacar */
+.rank-row.me { outline: 2px solid var(--crimson-soft); }

@@ -242,6 +242,27 @@ export async function startQuiz(groupId, modes) {
   return data;
 }
 
+// Última sesión de quiz de un grupo (para saber si hay una en marcha).
+export async function activeQuiz(groupId) {
+  const sb = await getClient();
+  const { data, error } = await sb
+    .from("quiz_sessions")
+    .select("*")
+    .eq("group_id", groupId)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+// Consultar el estado (running/finished) de una sesión concreta.
+export async function quizStatus(sessionId) {
+  const sb = await getClient();
+  const { data } = await sb.from("quiz_sessions").select("status").eq("id", sessionId).maybeSingle();
+  return data ? data.status : null;
+}
+
 export async function finishQuiz(sessionId) {
   const sb = await getClient();
   const { error } = await sb.from("quiz_sessions").update({ status: "finished", ended_at: new Date().toISOString() }).eq("id", sessionId);

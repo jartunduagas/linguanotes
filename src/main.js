@@ -28,6 +28,10 @@ let account = null;
 // Estado de la pestaña Grupos
 let groupsState = { loaded: false, list: [], openGroupId: null, error: null };
 
+// Estado del quiz en vivo (null = no activo)
+// { session, group, role: 'host'|'player', questions, idx, correct, wrong, state, answer, selected, finished, pollTimer }
+let liveQuiz = null;
+
 // Estado de sesión de quiz (null = no iniciado)
 let quizSession = null;
 // Estado de kana
@@ -1392,6 +1396,9 @@ function esc(s) {
 /* ===================== Grupos ===================== */
 
 function renderGroups() {
+  // Si hay un quiz en vivo en marcha, mostrar su pantalla.
+  if (liveQuiz) return renderLiveQuiz();
+
   const wrap = h("div");
   const role = account.profile?.role || "generic";
   const canCreate = role === "teacher" || role === "founder";
@@ -1624,9 +1631,261 @@ function openImportWord(w) {
   ]));
 }
 
-// Placeholders del quiz en vivo (se implementan en la siguiente etapa).
-function openLiveQuizHost(g) { alert("El quiz en vivo llega en la próxima actualización 🙂"); }
-function joinLiveQuiz(g) { alert("El quiz en vivo llega en la próxima actualización 🙂"); }
+/* ===================== Quiz en vivo ===================== */
+
+// Construye preguntas mezclando palabras del GRUPO + hasta 3 personales del alumno.
+function buildLiveQuestions(groupWords, modes, langId, activeTenses) {
+  // Normalizar palabras del grupo al formato que espera el motor de quiz.
+  const normGroup = groupWords.map((w) => ({
+    id: "g_" + w.id, term: w.term, en: w.en, es: w.es,
+    isVerb: w.is_verb, isNoun: w.is_noun, gender: w.gender,
+    prepositions: Array.isArray(w.prepositions) ? w.prepositions : [],
+    conjOverrides: {}, stats: { createdAt: Date.now() },
+  }));
+  // Hasta 3 palabras personales del idioma activo (privadas, solo las ve este alumno).
+  const personal = (langState().words || []).filter((w) => !w.isRule);
+  const shuffled = [...personal].sort(() => Math.random() - 0.5).slice(0, 3);
+  const pool = [...normGroup, ...shuffled];
+
+  // Elegir un modo al azar entre los que activó el profesor, por pregunta.
+  const questions = [];
+  const targetCount = Math.max(8, Math.min(20, pool.length * 2));
+  let guard = 0;
+  while (questions.length < targetCount && guard < targetCount * 6) {
+    guard++;
+    const w = pool[Math.floor(Math.random() * pool.length)];
+    const mode = modes[Math.floor(Math.random() * modes.length)];
+    const q = buildQuestion(w, langId, activeTenses, mode);
+    if (q) questions.push(q);
+  }
+  return questions;
+}
+
+// El PROFESOR lanza el quiz: elige qué evaluar.
+function openLiveQuizHost(g) {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+  const modes = { translation: true, conjugation: false, gender: false, preposition: false };
+  body.appendChild(h("h2", {}, "Iniciar quiz en vivo"));
+  body.appendChild(h("p", { class: "muted" }, "Elige qué evaluar. Los alumnos del grupo responderán a su ritmo hasta que pulses “Terminar”."));
+  const opts = [
+    ["translation", "🌐 Traducción"],
+    ["conjugation", "📖 Conjugación"],
+    ["gender", "🚺🚹 Género"],
+    ["preposition", "🔗 Preposición"],
+  ];
+  for (const [key, label] of opts) {
+    body.appendChild(h("label", { class: "checkbox-row", style: { cursor: "pointer", marginBottom: "6px" } }, [
+      h("input", { type: "checkbox", checked: modes[key], onchange: (e) => (modes[key] = e.target.checked) }),
+      h("span", {}, label),
+    ]));
+  }
+  const status = h("div", { class: "muted", style: { minHeight: "16px", marginTop: "8px" } }, "");
+  body.appendChild(status);
+  body.appendChild(h("div", { class: "modal-actions" }, [
+    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
+    h("button", { class: "btn primary", onclick: async () => {
+      const chosen = Object.keys(modes).filter((k) => modes[k]);
+      if (!chosen.length) { status.textContent = "Elige al menos un tipo."; return; }
+      status.textContent = "Iniciando…";
+      try {
+        const words = await api.groupWords(g.id);
+        if (!words.length) { status.textContent = "El grupo no tiene palabras todavía."; return; }
+        const session = await api.startQuiz(g.id, chosen);
+        dismiss();
+        startLiveQuizSession(session, g, "host", words);
+      } catch (e) { status.style.color = "var(--bad)"; status.textContent = "Error: " + e.message; }
+    } }, "Iniciar"),
+  ]));
+}
+
+// El ALUMNO entra a un quiz en marcha (si lo hay).
+async function joinLiveQuiz(g) {
+  try {
+    const session = await api.activeQuiz(g.id);
+    if (!session || session.status !== "running") {
+      alert("No hay un quiz en vivo ahora mismo. Pídele a tu profesor que lo inicie.");
+      return;
+    }
+    const words = await api.groupWords(g.id);
+    startLiveQuizSession(session, g, "player", words);
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+// Arranca la sesión de quiz en vivo (para host o player).
+function startLiveQuizSession(session, group, role, groupWords) {
+  const modes = session.modes || ["translation"];
+  const questions = buildLiveQuestions(groupWords, modes, lang(), langState().activeTenses);
+  liveQuiz = {
+    session, group, role, questions,
+    idx: 0, correct: 0, wrong: 0,
+    state: "idle", answer: "", selected: [],
+    finished: false, pollTimer: null,
+  };
+  currentTab = "groups";
+  render();
+
+  // El alumno comprueba periódicamente si el profesor ya cerró el quiz.
+  if (role === "player") {
+    liveQuiz.pollTimer = setInterval(async () => {
+      try {
+        const st = await api.quizStatus(session.id);
+        if (st === "finished" && liveQuiz && !liveQuiz.finished) {
+          liveQuiz.finished = true;
+          clearInterval(liveQuiz.pollTimer);
+          render();
+        }
+      } catch {}
+    }, 4000);
+  }
+}
+
+function endLiveQuiz() {
+  if (liveQuiz && liveQuiz.pollTimer) clearInterval(liveQuiz.pollTimer);
+  liveQuiz = null;
+  groupsState.openGroupId = null;
+  render();
+}
+
+// Pantalla del quiz en vivo (se muestra desde renderGroups cuando liveQuiz != null).
+function renderLiveQuiz() {
+  const lq = liveQuiz;
+  const wrap = h("div");
+
+  wrap.appendChild(
+    h("div", { class: "cat-head", style: { marginBottom: "12px" } }, [
+      h("h3", { style: { margin: 0 } }, "Quiz en vivo · " + lq.group.name),
+    ])
+  );
+
+  // Si terminó: mostrar ranking
+  if (lq.finished) {
+    wrap.appendChild(renderLiveRanking());
+    return wrap;
+  }
+
+  // Controles del profesor
+  if (lq.role === "host") {
+    wrap.appendChild(
+      h("div", { class: "card" }, [
+        h("p", { class: "muted" }, "El quiz está en marcha. Los alumnos responden a su ritmo. Cuando quieras, termínalo para ver el ranking."),
+        h("div", { class: "inline", style: { gap: "8px" } }, [
+          h("button", { class: "btn danger", onclick: async () => {
+            try { await api.finishQuiz(lq.session.id); lq.finished = true; render(); } catch (e) { alert("Error: " + e.message); }
+          } }, "⏹ Terminar quiz y ver ranking"),
+        ]),
+      ])
+    );
+  }
+
+  // Zona de preguntas (host también puede jugar mientras tanto)
+  wrap.appendChild(renderLiveQuestion());
+  return wrap;
+}
+
+function renderLiveQuestion() {
+  const lq = liveQuiz;
+  const q = lq.questions[lq.idx];
+
+  if (!q) {
+    // El alumno terminó sus preguntas pero el profe no ha cerrado: mensaje de espera.
+    return h("div", { class: "card quiz-card" }, [
+      h("div", { class: "section-title" }, "¡Has respondido todas! 🎉"),
+      h("p", { class: "muted" }, `Aciertos: ${lq.correct} · Fallos: ${lq.wrong}.`),
+      h("p", { class: "muted" }, lq.role === "host" ? "Pulsa “Terminar” arriba para ver el ranking." : "Espera a que tu profesor termine el quiz para ver el ranking."),
+    ]);
+  }
+
+  async function record(correct) {
+    lq.state = correct ? "correct" : "wrong";
+    if (correct) lq.correct++; else lq.wrong++;
+    try { await api.submitQuizAnswer(lq.session.id, correct); } catch (e) { console.warn(e); }
+    render();
+  }
+  function next() { lq.idx++; lq.state = "idle"; lq.answer = ""; lq.selected = []; render(); }
+
+  let area;
+  if (q.choice && q.multi) {
+    lq.selected = lq.selected || [];
+    const optCorrect = (opt) => (q.correctSet || []).includes(normalize(opt));
+    area = h("div", { class: "options", style: { marginTop: "16px" } }, q.options.map((opt) => {
+      let cls = "option";
+      if (lq.state !== "idle") { if (optCorrect(opt)) cls += " correct"; else if (lq.selected.includes(opt)) cls += " wrong"; }
+      else if (lq.selected.includes(opt)) cls += " selected";
+      return h("button", { class: cls, disabled: lq.state !== "idle", onclick: () => {
+        const i = lq.selected.indexOf(opt); if (i >= 0) lq.selected.splice(i, 1); else lq.selected.push(opt); render();
+      } }, opt);
+    }));
+  } else if (q.choice) {
+    area = h("div", { class: "options", style: { marginTop: "16px" } }, q.options.map((opt) => {
+      let cls = "option";
+      if (lq.state !== "idle") { if (isCorrect(q, opt)) cls += " correct"; else if (lq.answer === opt) cls += " wrong"; }
+      return h("button", { class: cls, disabled: lq.state !== "idle", onclick: () => { lq.answer = opt; record(isCorrect(q, opt)); } }, opt);
+    }));
+  } else {
+    const input = h("input", {
+      value: lq.answer, placeholder: "Escribe tu respuesta…", disabled: lq.state !== "idle",
+      style: { marginTop: "16px", textAlign: "center", fontSize: "18px" },
+      oninput: (e) => (lq.answer = e.target.value),
+      onkeydown: (e) => { if (e.key === "Enter" && lq.state === "idle") record(isCorrect(q, lq.answer)); },
+    });
+    area = input;
+    if (lq.state === "idle") setTimeout(() => input.focus(), 0);
+  }
+
+  return h("div", { class: "card quiz-card" }, [
+    h("div", { class: "quiz-progress" }, `Pregunta ${lq.idx + 1} · ✓ ${lq.correct} · ✗ ${lq.wrong}`),
+    h("div", { class: "quiz-prompt" }, q.prompt),
+    q.hint ? h("div", { class: "muted" }, q.hint) : null,
+    area,
+    lq.state !== "idle"
+      ? h("div", { class: "feedback " + (lq.state === "correct" ? "good" : "bad") }, [
+          document.createTextNode(lq.state === "correct" ? "✓ ¡Correcto!" : "✗ Casi."),
+          h("div", { class: "answer", html: `Respuesta: <b>${esc(q.answer)}</b>` }),
+        ])
+      : null,
+    h("div", { class: "inline", style: { justifyContent: "center", marginTop: "16px" } }, [
+      lq.state === "idle"
+        ? (q.multi
+            ? h("button", { class: "btn primary", disabled: !(lq.selected && lq.selected.length), onclick: () => record(isMultiCorrect(q, lq.selected)) }, "Comprobar")
+            : q.choice ? null : h("button", { class: "btn primary", onclick: () => record(isCorrect(q, lq.answer)) }, "Comprobar"))
+        : h("button", { class: "btn primary", onclick: next }, "Siguiente →"),
+    ]),
+  ]);
+}
+
+// Ranking final: todos los puestos; top 3 resaltados y grandes.
+function renderLiveRanking() {
+  const lq = liveQuiz;
+  const card = h("div", { class: "card quiz-card" }, [
+    h("div", { class: "section-title" }, "🏆 Resultados"),
+    h("p", { class: "muted" }, `Tu resultado: ✓ ${lq.correct} aciertos · ✗ ${lq.wrong} fallos.`),
+  ]);
+  const listHost = h("div", {}, [h("p", { class: "muted" }, "Cargando ranking…")]);
+  card.appendChild(listHost);
+  card.appendChild(h("button", { class: "btn primary", style: { marginTop: "14px" }, onclick: endLiveQuiz }, "Salir"));
+
+  api.quizRanking(lq.session.id).then((rows) => {
+    clear(listHost);
+    if (!rows.length) { listHost.appendChild(h("p", { class: "muted" }, "Nadie respondió todavía.")); return; }
+    const podium = h("div", { class: "podium" });
+    rows.forEach((r, i) => {
+      const medal = ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
+      const isTop = i < 3;
+      const me = r.user_id === account.user.id;
+      podium.appendChild(
+        h("div", { class: "rank-row" + (isTop ? " top" : "") + (me ? " me" : "") }, [
+          h("span", { class: "rank-medal" }, medal),
+          h("span", { class: "rank-name" }, r.display_name + (me ? " (tú)" : "")),
+          h("span", { class: "rank-score" }, `${r.correct}/${r.total}`),
+        ])
+      );
+    });
+    listHost.appendChild(podium);
+  }).catch((e) => { clear(listHost); listHost.appendChild(h("p", { class: "muted" }, "Error: " + e.message)); });
+
+  return card;
+}
 
 /* ===================== Cuenta (login / registro / perfil) ===================== */
 
