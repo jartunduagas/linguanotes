@@ -134,12 +134,13 @@ function renderTopbar() {
       ]),
       h("div", { class: "spacer" }),
       h("div", { class: "lang-select" }, [h("label", { style: { margin: 0 } }, "Idioma"), select]),
-      h("button", {
-        class: "btn small" + (account ? "" : " primary"),
-        style: { marginLeft: "8px" },
-        onclick: openAccount,
-        title: account ? "Tu cuenta" : "Iniciar sesión",
-      }, account ? `👤 ${truncate(account.profile?.display_name || "Cuenta", 12)}` : "Entrar"),
+      // Si hay sesión: un botón con tu nombre. Si no: dos botones visibles.
+      ...(account
+        ? [h("button", { class: "btn small", style: { marginLeft: "8px" }, onclick: () => openAccount("profile"), title: "Tu cuenta" }, `👤 ${truncate(account.profile?.display_name || "Cuenta", 12)}`)]
+        : [
+            h("button", { class: "btn small", style: { marginLeft: "8px" }, onclick: () => openAccount("login") }, "Iniciar sesión"),
+            h("button", { class: "btn small primary", style: { marginLeft: "6px" }, onclick: () => openAccount("signup") }, "Registrarse"),
+          ]),
     ]),
   ]);
 }
@@ -1371,26 +1372,33 @@ function esc(s) {
 
 /* ===================== Cuenta (login / registro / perfil) ===================== */
 
-function openAccount() {
+function openAccount(initialMode) {
   const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
   const dismiss = openModal(body, () => dismiss());
 
   if (account) {
     renderAccountProfile(body, dismiss);
   } else {
-    renderAuthForm(body, dismiss);
+    renderAuthForm(body, dismiss, initialMode === "signup" ? "signup" : "login");
   }
 }
 
-function renderAuthForm(body, dismiss) {
+function renderAuthForm(body, dismiss, startMode) {
   clear(body);
-  let mode = "login"; // 'login' | 'signup'
+  let mode = startMode || "login"; // 'login' | 'signup'
   const status = h("div", { class: "muted", style: { minHeight: "18px", marginTop: "8px" } }, "");
 
   const emailInput = h("input", { type: "email", placeholder: "tu correo", autocomplete: "email" });
-  const passInput = h("input", { type: "password", placeholder: "contraseña", autocomplete: "current-password" });
-  const nameInput = h("input", { placeholder: "nombre visible (ej. Juan A.)" });
+  const passInput = h("input", { type: "password", placeholder: "contraseña (mín. 6)", autocomplete: "current-password" });
+  const nameInput = h("input", { placeholder: "nombre visible (ej. Juan Pablo)" });
   const nameRow = h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Nombre"), nameInput]);
+
+  // Botón "ojo" para ver/ocultar la contraseña.
+  const togglePass = h("button", { class: "btn small ghost", type: "button", title: "Mostrar/ocultar", style: { flex: "0 0 auto" } }, "👁");
+  togglePass.addEventListener("click", () => {
+    passInput.type = passInput.type === "password" ? "text" : "password";
+    togglePass.textContent = passInput.type === "password" ? "👁" : "🙈";
+  });
 
   async function submit() {
     const email = emailInput.value.trim();
@@ -1422,7 +1430,10 @@ function renderAuthForm(body, dismiss) {
     body.appendChild(h("p", { class: "muted" }, "Tus notas se guardarán en la nube y podrás usarlas en el móvil y el PC. También podrás unirte a grupos."));
     if (mode === "signup") body.appendChild(nameRow);
     body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Correo"), emailInput]));
-    body.appendChild(h("div", { style: { marginBottom: "6px" } }, [h("label", {}, "Contraseña"), passInput]));
+    body.appendChild(h("div", { style: { marginBottom: "6px" } }, [
+      h("label", {}, "Contraseña"),
+      h("div", { class: "inline", style: { gap: "8px" } }, [passInput, togglePass]),
+    ]));
     body.appendChild(status);
     body.appendChild(
       h("div", { class: "modal-actions" }, [
@@ -1494,8 +1505,9 @@ function renderAccountProfile(body, dismiss) {
 
 function friendlyAuthError(e) {
   const m = (e && e.message) || "";
+  if (/email not confirmed/i.test(m)) return "Tu correo no está confirmado. (El administrador debe desactivar la confirmación de email en Supabase, o confirmarlo.)";
   if (/Invalid login/i.test(m)) return "Correo o contraseña incorrectos.";
-  if (/already registered/i.test(m)) return "Ese correo ya está registrado. Inicia sesión.";
+  if (/already registered|User already/i.test(m)) return "Ese correo ya está registrado. Inicia sesión.";
   if (/cargar Supabase/i.test(m)) return "Sin conexión. Necesitas internet para tu cuenta.";
   if (/Password should be/i.test(m)) return "La contraseña es muy corta (mínimo 6).";
   return m || "No se pudo completar.";
