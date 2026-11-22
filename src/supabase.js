@@ -215,12 +215,8 @@ export async function groupWords(groupId) {
   return data || [];
 }
 
-export async function addGroupWord(groupId, word) {
-  const sb = await getClient();
-  const uid = (await sb.auth.getUser()).data.user.id;
-  const { error } = await sb.from("group_words").insert({
-    group_id: groupId,
-    added_by: uid,
+function wordToRow(word) {
+  return {
     term: word.term,
     en: word.en || "",
     es: word.es || "",
@@ -229,7 +225,25 @@ export async function addGroupWord(groupId, word) {
     gender: word.gender || "",
     prepositions: word.prepositions || [],
     notes: word.notes || "",
-  });
+  };
+}
+
+export async function addGroupWord(groupId, word) {
+  const sb = await getClient();
+  const uid = (await sb.auth.getUser()).data.user.id;
+  const { error } = await sb.from("group_words").insert({ group_id: groupId, added_by: uid, ...wordToRow(word) });
+  if (error) throw error;
+}
+
+export async function updateGroupWord(wordId, word) {
+  const sb = await getClient();
+  const { error } = await sb.from("group_words").update(wordToRow(word)).eq("id", wordId);
+  if (error) throw error;
+}
+
+export async function deleteGroupWord(wordId) {
+  const sb = await getClient();
+  const { error } = await sb.from("group_words").delete().eq("id", wordId);
   if (error) throw error;
 }
 

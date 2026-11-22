@@ -1529,12 +1529,32 @@ function renderGroupWordRow(w, g) {
     ? " · 🔗 " + w.prepositions.map((p) => (p.use ? `${p.prep} (${p.use})` : p.prep)).join(", ")
     : "";
   const genderText = w.gender ? ` · ${w.gender === "m" ? "le" : "la"}` : "";
+
+  // ¿Puedo editar/borrar esta palabra? Si la añadí yo, o soy el dueño del grupo.
+  const canEdit = w.added_by === account.user.id || g.owner_id === account.user.id;
+
+  const actions = [
+    h("button", { class: "btn small", title: "Guardar en mis notas", onclick: () => openImportWord(w) }, "⬇ Importar"),
+  ];
+  if (canEdit) {
+    actions.push(
+      h("button", { class: "btn small", onclick: () => openEditGroupWord(w, g) }, "Editar"),
+      h("button", {
+        class: "btn small danger",
+        onclick: async () => {
+          if (!confirm(`¿Borrar “${w.term}” del grupo?`)) return;
+          try { await api.deleteGroupWord(w.id); render(); } catch (e) { alert("Error: " + e.message); }
+        },
+      }, "Borrar")
+    );
+  }
+
   return h("div", { class: "word" }, [
     h("div", { class: "grow" }, [
       h("div", { class: "term" }, w.term + (w.is_verb ? " (verbo)" : "") + genderText),
       h("div", { class: "trans", html: `🇬🇧 <b>${esc(w.en) || "—"}</b> · 🇪🇸 <b>${esc(w.es) || "—"}</b>${esc(prepText)}` }),
     ]),
-    h("button", { class: "btn small", title: "Guardar en mis notas", onclick: () => openImportWord(w) }, "⬇ Importar"),
+    h("div", { class: "actions" }, actions),
   ]);
 }
 
@@ -1600,6 +1620,23 @@ function openAddGroupWord(g) {
       await api.addGroupWord(g.id, payload);
     },
     afterSave: () => render(), // recargar la lista de palabras del grupo
+  });
+}
+
+/* ---- Editar una palabra del grupo ---- */
+function openEditGroupWord(w, g) {
+  // Adaptar la palabra del grupo (campos is_verb…) al formato del formulario (isVerb…)
+  const initial = {
+    term: w.term, en: w.en, es: w.es, notes: w.notes || "",
+    isVerb: !!w.is_verb, isNoun: !!w.is_noun, gender: w.gender || "",
+    prepositions: Array.isArray(w.prepositions) ? w.prepositions : [],
+  };
+  openWordForm(initial, {
+    hideCategory: true,
+    onSave: async (payload) => {
+      await api.updateGroupWord(w.id, payload);
+    },
+    afterSave: () => render(),
   });
 }
 
