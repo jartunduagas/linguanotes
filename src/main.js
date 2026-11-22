@@ -25,6 +25,9 @@ let selectedCategory = null; // null = ver la lista de categorías; id = ver una
 // Sesión de cuenta (null = no logueado). { user, profile }
 let account = null;
 
+// Estado de la pestaña Grupos
+let groupsState = { loaded: false, list: [], openGroupId: null, error: null };
+
 // Estado de sesión de quiz (null = no iniciado)
 let quizSession = null;
 // Estado de kana
@@ -82,16 +85,19 @@ function render() {
   else if (currentTab === "rules" && lang() === "french") container.appendChild(renderRules());
   else if (currentTab === "kana" && isJapanese()) container.appendChild(renderKana());
   else if (currentTab === "quiz") container.appendChild(renderQuiz());
+  else if (currentTab === "groups" && account) container.appendChild(renderGroups());
   root.appendChild(container);
 }
 
 function tabsFor() {
   if (isJapanese()) {
-    return [
+    const jp = [
       { id: "notes", label: "Notas" },
       { id: "kana", label: "Escritura y lectura" },
       { id: "quiz", label: "Quiz" },
     ];
+    if (account) jp.push({ id: "groups", label: "👥 Grupos" });
+    return jp;
   }
   const tabs = [
     { id: "notes", label: "Notas" },
@@ -100,6 +106,8 @@ function tabsFor() {
   // Pestaña de Reglas solo para francés.
   if (lang() === "french") tabs.push({ id: "rules", label: "📌 Reglas" });
   tabs.push({ id: "quiz", label: "Quiz" });
+  // Pestaña de Grupos solo si has iniciado sesión.
+  if (account) tabs.push({ id: "groups", label: "👥 Grupos" });
   return tabs;
 }
 
@@ -1370,6 +1378,258 @@ function esc(s) {
   return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+/* ===================== Grupos ===================== */
+
+function renderGroups() {
+  const wrap = h("div");
+  const role = account.profile?.role || "generic";
+  const canCreate = role === "teacher" || role === "founder";
+
+  // Si estamos viendo un grupo concreto
+  if (groupsState.openGroupId) {
+    return renderGroupDetail(groupsState.openGroupId);
+  }
+
+  // Barra de acciones: crear (profes) y unirse (todos)
+  const actions = [];
+  if (canCreate) actions.push(h("button", { class: "btn primary", onclick: openCreateGroup }, "+ Crear grupo"));
+  actions.push(h("button", { class: "btn", onclick: openJoinGroup }, "Unirse con código"));
+  wrap.appendChild(
+    h("div", { class: "toolbar" }, [
+      h("div", { class: "grow" }, [
+        h("div", { class: "section-title" }, "Tus grupos"),
+        h("p", { class: "muted", style: { margin: 0 } }, canCreate ? "Crea grupos para tu clase o únete con un código." : "Únete a un grupo con el código que te dé tu profesor."),
+      ]),
+      ...actions,
+    ])
+  );
+
+  // Cargar la lista (una vez)
+  if (!groupsState.loaded) {
+    wrap.appendChild(h("div", { class: "empty" }, "Cargando tus grupos…"));
+    api.myGroups().then((list) => {
+      groupsState.loaded = true;
+      groupsState.list = list;
+      if (currentTab === "groups") render();
+    }).catch((e) => {
+      groupsState.loaded = true;
+      groupsState.error = e.message;
+      if (currentTab === "groups") render();
+    });
+    return wrap;
+  }
+
+  if (groupsState.error) {
+    wrap.appendChild(h("div", { class: "empty" }, "No se pudieron cargar los grupos: " + groupsState.error));
+    return wrap;
+  }
+  if (!groupsState.list.length) {
+    wrap.appendChild(h("div", { class: "empty" }, canCreate ? "Aún no tienes grupos. Crea uno para empezar." : "No estás en ningún grupo. Pide el código a tu profesor y pulsa “Unirse con código”."));
+    return wrap;
+  }
+
+  const grid = h("div", { class: "cat-grid" });
+  for (const g of groupsState.list) {
+    const mine = g.owner_id === account.user.id;
+    grid.appendChild(
+      h("button", { class: "cat-card", onclick: () => { groupsState.openGroupId = g.id; render(); } }, [
+        h("div", { class: "cat-card-name" }, g.name),
+        h("div", { class: "cat-card-count" }, [
+          document.createTextNode((mine ? "🎓 Tu grupo · " : "") + "código " + g.join_code),
+          g.is_open ? null : document.createTextNode(" · cerrado"),
+        ]),
+      ])
+    );
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function renderGroupDetail(groupId) {
+  const wrap = h("div");
+  const g = groupsState.list.find((x) => x.id === groupId);
+  if (!g) { groupsState.openGroupId = null; return renderGroups(); }
+  const mine = g.owner_id === account.user.id;
+
+  wrap.appendChild(
+    h("div", { class: "cat-head", style: { marginBottom: "12px" } }, [
+      h("button", { class: "btn ghost small", onclick: () => { groupsState.openGroupId = null; render(); } }, "← Grupos"),
+      h("h3", { style: { margin: 0 } }, g.name),
+    ])
+  );
+
+  // Tarjeta de info: código grande + acciones del profesor
+  const info = h("div", { class: "card" }, [
+    h("div", { class: "muted" }, "Código para unirse:"),
+    h("div", { style: { fontSize: "30px", fontWeight: "800", letterSpacing: "4px", color: "var(--crimson-soft)", margin: "4px 0 10px" } }, g.join_code),
+    g.is_open ? h("span", { class: "badge" }, "abierto") : h("span", { class: "badge" }, "cerrado"),
+  ]);
+  if (mine) {
+    const ownerActions = h("div", { class: "inline", style: { marginTop: "12px", gap: "8px" } }, [
+      g.is_open ? h("button", { class: "btn small", onclick: async () => {
+        try { await api.closeGroup(g.id); g.is_open = false; render(); } catch (e) { alert("Error: " + e.message); }
+      } }, "Cerrar grupo") : null,
+      h("button", { class: "btn small primary", onclick: () => openLiveQuizHost(g) }, "▶ Iniciar quiz en vivo"),
+      h("button", { class: "btn small danger", onclick: async () => {
+        if (!confirm("¿Borrar el grupo? Se perderán sus palabras.")) return;
+        try { await api.deleteGroup(g.id); groupsState.openGroupId = null; groupsState.loaded = false; render(); } catch (e) { alert("Error: " + e.message); }
+      } }, "Borrar grupo"),
+    ]);
+    info.appendChild(ownerActions);
+  } else {
+    info.appendChild(h("button", { class: "btn small", style: { marginTop: "12px" }, onclick: () => joinLiveQuiz(g) }, "Entrar al quiz en vivo (si hay)"));
+  }
+  wrap.appendChild(info);
+
+  // Palabras del grupo
+  const wordsCard = h("div", { class: "card" }, [
+    h("div", { class: "inline", style: { justifyContent: "space-between" } }, [
+      h("div", { class: "section-title", style: { margin: 0 } }, "Palabras del grupo"),
+      (mine || g.allow_student_words) ? h("button", { class: "btn small primary", onclick: () => openAddGroupWord(g) }, "+ Añadir") : null,
+    ]),
+  ]);
+  const wordsHost = h("div", {}, [h("p", { class: "muted" }, "Cargando palabras…")]);
+  wordsCard.appendChild(wordsHost);
+  wrap.appendChild(wordsCard);
+
+  api.groupWords(g.id).then((words) => {
+    clear(wordsHost);
+    if (!words.length) { wordsHost.appendChild(h("p", { class: "muted" }, "Todavía no hay palabras. Pulsa “+ Añadir”.")); return; }
+    words.forEach((w) => wordsHost.appendChild(renderGroupWordRow(w, g)));
+  }).catch((e) => { clear(wordsHost); wordsHost.appendChild(h("p", { class: "muted" }, "Error: " + e.message)); });
+
+  return wrap;
+}
+
+function renderGroupWordRow(w, g) {
+  const prepText = Array.isArray(w.prepositions) && w.prepositions.length
+    ? " · 🔗 " + w.prepositions.map((p) => (p.use ? `${p.prep} (${p.use})` : p.prep)).join(", ")
+    : "";
+  const genderText = w.gender ? ` · ${w.gender === "m" ? "le" : "la"}` : "";
+  return h("div", { class: "word" }, [
+    h("div", { class: "grow" }, [
+      h("div", { class: "term" }, w.term + (w.is_verb ? " (verbo)" : "") + genderText),
+      h("div", { class: "trans", html: `🇬🇧 <b>${esc(w.en) || "—"}</b> · 🇪🇸 <b>${esc(w.es) || "—"}</b>${esc(prepText)}` }),
+    ]),
+    h("button", { class: "btn small", title: "Guardar en mis notas", onclick: () => openImportWord(w) }, "⬇ Importar"),
+  ]);
+}
+
+/* ---- Crear grupo ---- */
+function openCreateGroup() {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+  const nameInput = h("input", { placeholder: "Nombre del grupo (ej. Francés A1 - Martes)" });
+  let allowStudents = true;
+  const status = h("div", { class: "muted", style: { minHeight: "16px" } }, "");
+  body.appendChild(h("h2", {}, "Crear grupo"));
+  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Nombre"), nameInput]));
+  body.appendChild(h("label", { class: "checkbox-row", style: { cursor: "pointer", marginBottom: "10px" } }, [
+    h("input", { type: "checkbox", checked: true, onchange: (e) => (allowStudents = e.target.checked) }),
+    h("span", {}, "Permitir que los alumnos añadan palabras"),
+  ]));
+  body.appendChild(status);
+  body.appendChild(h("div", { class: "modal-actions" }, [
+    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (!nameInput.value.trim()) { status.textContent = "Escribe un nombre."; return; }
+      status.textContent = "Creando…";
+      try {
+        await api.createGroup(nameInput.value.trim(), allowStudents);
+        groupsState.loaded = false; // recargar lista
+        dismiss(); render();
+      } catch (e) { status.style.color = "var(--bad)"; status.textContent = "Error: " + e.message; }
+    } }, "Crear"),
+  ]));
+  setTimeout(() => nameInput.focus(), 0);
+}
+
+/* ---- Unirse a grupo ---- */
+function openJoinGroup() {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+  const codeInput = h("input", { placeholder: "código de 6 dígitos", inputmode: "numeric" });
+  const status = h("div", { class: "muted", style: { minHeight: "16px" } }, "");
+  body.appendChild(h("h2", {}, "Unirse a un grupo"));
+  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Código"), codeInput]));
+  body.appendChild(status);
+  body.appendChild(h("div", { class: "modal-actions" }, [
+    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
+    h("button", { class: "btn primary", onclick: async () => {
+      const code = codeInput.value.trim();
+      if (!code) { status.textContent = "Escribe el código."; return; }
+      status.textContent = "Uniéndote…";
+      try {
+        await api.joinGroup(code);
+        groupsState.loaded = false;
+        dismiss(); render();
+      } catch (e) { status.style.color = "var(--bad)"; status.textContent = e.message; }
+    } }, "Unirme"),
+  ]));
+  setTimeout(() => codeInput.focus(), 0);
+}
+
+/* ---- Añadir palabra al grupo (reusa un formulario simple) ---- */
+function openAddGroupWord(g) {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+  const term = h("input", { placeholder: "la palabra" });
+  const en = h("input", { placeholder: "inglés" });
+  const es = h("input", { placeholder: "español" });
+  const status = h("div", { class: "muted", style: { minHeight: "16px" } }, "");
+  body.appendChild(h("h2", {}, "Añadir palabra al grupo"));
+  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Palabra"), term]));
+  body.appendChild(h("div", { class: "row", style: { marginBottom: "10px" } }, [
+    h("div", {}, [h("label", {}, "🇬🇧 Inglés"), en]),
+    h("div", {}, [h("label", {}, "🇪🇸 Español"), es]),
+  ]));
+  body.appendChild(status);
+  body.appendChild(h("div", { class: "modal-actions" }, [
+    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (!term.value.trim()) { status.textContent = "Escribe la palabra."; return; }
+      status.textContent = "Guardando…";
+      try {
+        await api.addGroupWord(g.id, { term: term.value.trim(), en: en.value.trim(), es: es.value.trim() });
+        dismiss(); render();
+      } catch (e) { status.style.color = "var(--bad)"; status.textContent = "Error: " + e.message; }
+    } }, "Añadir"),
+  ]));
+  setTimeout(() => term.focus(), 0);
+}
+
+/* ---- Importar palabra del grupo a mis notas (eligiendo categoría) ---- */
+function openImportWord(w) {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+  // Importamos al idioma activo actual
+  let categoryId = langState().categories[0]?.id || "vocabulary";
+  body.appendChild(h("h2", {}, "Importar a mis notas"));
+  body.appendChild(h("p", { class: "muted" }, `“${w.term}” se guardará en tu idioma activo (${langMeta().label}).`));
+  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [
+    h("label", {}, "¿En qué categoría?"),
+    h("select", { onchange: (e) => (categoryId = e.target.value) }, categoryOptions(categoryId)),
+  ]));
+  body.appendChild(h("div", { class: "modal-actions" }, [
+    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
+    h("button", { class: "btn primary", onclick: () => {
+      langState().words.push(makeWord({
+        term: w.term, en: w.en || "", es: w.es || "",
+        isVerb: !!w.is_verb, isNoun: !!w.is_noun, gender: w.gender || "",
+        prepositions: Array.isArray(w.prepositions) ? w.prepositions : [],
+        notes: w.notes || "", categoryId,
+      }));
+      save();
+      dismiss();
+      alert("✓ Guardada en tus notas.");
+    } }, "Importar"),
+  ]));
+}
+
+// Placeholders del quiz en vivo (se implementan en la siguiente etapa).
+function openLiveQuizHost(g) { alert("El quiz en vivo llega en la próxima actualización 🙂"); }
+function joinLiveQuiz(g) { alert("El quiz en vivo llega en la próxima actualización 🙂"); }
+
 /* ===================== Cuenta (login / registro / perfil) ===================== */
 
 function openAccount(initialMode) {
@@ -1519,7 +1779,7 @@ function renderAccountProfile(body, dismiss) {
 
   body.appendChild(
     h("div", { class: "modal-actions" }, [
-      h("button", { class: "btn danger", onclick: async () => { await api.signOut(); account = null; dismiss(); render(); } }, "Cerrar sesión"),
+      h("button", { class: "btn danger", onclick: async () => { await api.signOut(); account = null; groupsState = { loaded: false, list: [], openGroupId: null, error: null }; if (currentTab === "groups") currentTab = "notes"; dismiss(); render(); } }, "Cerrar sesión"),
       h("button", { class: "btn primary", onclick: () => dismiss() }, "Listo"),
     ])
   );
