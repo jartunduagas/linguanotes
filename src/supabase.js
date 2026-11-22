@@ -108,7 +108,30 @@ export async function redeemTeacherInvite(code) {
   const sb = await getClient();
   const { data, error } = await sb.rpc("redeem_teacher_invite", { invite_code: code });
   if (error) throw error;
-  return data; // 'ok' | 'invalid' | 'expired' | 'used_up'
+  return data; // 'requested' | 'already' | 'invalid' | 'expired'
+}
+
+// Estado de mi solicitud de profesor (o null si no he solicitado).
+export async function myTeacherRequest() {
+  const sb = await getClient();
+  const uid = (await sb.auth.getUser()).data.user.id;
+  const { data } = await sb.from("teacher_requests").select("status").eq("user_id", uid).maybeSingle();
+  return data ? data.status : null;
+}
+
+// (Fundador) Lista de solicitudes pendientes.
+export async function pendingTeacherRequests() {
+  const sb = await getClient();
+  const { data, error } = await sb.rpc("pending_teacher_requests");
+  if (error) throw error;
+  return data || [];
+}
+
+// (Fundador) Aprobar o rechazar una solicitud.
+export async function decideTeacherRequest(userId, approve) {
+  const sb = await getClient();
+  const { error } = await sb.rpc("decide_teacher_request", { req_user_id: userId, approve });
+  if (error) throw error;
 }
 
 /* ============================ SINCRONIZACIÓN DE NOTAS ============================ */

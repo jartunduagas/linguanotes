@@ -1778,26 +1778,59 @@ function renderAccountProfile(body, dismiss) {
     nameStatus,
   ]));
 
-  // Canjear código de profesor (solo si eres genérico)
+  // Canjear código de profesor (solo si eres estudiante genérico)
   if (p.role === "generic") {
     const codeInput = h("input", { placeholder: "código de profesor" });
     const codeStatus = h("div", { class: "muted", style: { fontSize: "12px", minHeight: "16px" } }, "");
+    // Mostrar si ya hay una solicitud enviada
+    api.myTeacherRequest().then((st) => {
+      if (st === "pending") { codeStatus.textContent = "⏳ Solicitud enviada. Espera la aprobación del administrador."; codeStatus.style.color = "var(--crimson-soft)"; }
+      else if (st === "rejected") { codeStatus.textContent = "Tu solicitud fue rechazada."; codeStatus.style.color = "var(--bad)"; }
+    }).catch(() => {});
     body.appendChild(h("div", { style: { marginBottom: "10px" } }, [
-      h("label", {}, "¿Tienes un código de profesor?"),
+      h("label", {}, "¿Quieres ser profesor? Introduce el código"),
       h("div", { class: "inline", style: { gap: "8px" } }, [
         codeInput,
         h("button", { class: "btn small", onclick: async () => {
           try {
             const r = await api.redeemTeacherInvite(codeInput.value.trim());
-            const msgs = { ok: "✓ ¡Ahora eres profesor!", invalid: "Código no válido.", expired: "Código caducado.", used_up: "Código agotado." };
+            const msgs = {
+              requested: "✓ Solicitud enviada. El administrador debe aprobarte.",
+              already: "Ya eres profesor o fundador.",
+              invalid: "Código no válido.",
+              expired: "Código caducado.",
+            };
             codeStatus.textContent = msgs[r] || r;
-            codeStatus.style.color = r === "ok" ? "var(--good)" : "var(--bad)";
-            if (r === "ok") { await refreshAccount(); render(); }
+            codeStatus.style.color = r === "requested" ? "var(--good)" : "var(--bad)";
           } catch (e) { codeStatus.textContent = "Error: " + e.message; codeStatus.style.color = "var(--bad)"; }
-        } }, "Canjear"),
+        } }, "Solicitar"),
       ]),
       codeStatus,
     ]));
+  }
+
+  // Panel del FUNDADOR: solicitudes de profesor pendientes
+  if (p.role === "founder") {
+    const reqHost = h("div", { style: { marginBottom: "10px" } }, [
+      h("label", {}, "Solicitudes de profesor"),
+      h("div", { class: "muted", style: { fontSize: "12px" } }, "Cargando…"),
+    ]);
+    body.appendChild(reqHost);
+    api.pendingTeacherRequests().then((reqs) => {
+      clear(reqHost);
+      reqHost.appendChild(h("label", {}, "Solicitudes de profesor pendientes"));
+      if (!reqs.length) { reqHost.appendChild(h("div", { class: "muted", style: { fontSize: "12px" } }, "No hay solicitudes pendientes.")); return; }
+      for (const r of reqs) {
+        const row = h("div", { class: "word" }, [
+          h("div", { class: "grow", html: `<b>${esc(r.display_name)}</b><br><span class="muted" style="font-size:12px">${esc(r.email)}</span>` }),
+          h("div", { class: "actions" }, [
+            h("button", { class: "btn small primary", onclick: async () => { try { await api.decideTeacherRequest(r.user_id, true); row.remove(); } catch (e) { alert("Error: " + e.message); } } }, "Aprobar"),
+            h("button", { class: "btn small danger", onclick: async () => { try { await api.decideTeacherRequest(r.user_id, false); row.remove(); } catch (e) { alert("Error: " + e.message); } } }, "Rechazar"),
+          ]),
+        ]);
+        reqHost.appendChild(row);
+      }
+    }).catch((e) => { clear(reqHost); reqHost.appendChild(h("div", { class: "muted", style: { fontSize: "12px" } }, "Error: " + e.message)); });
   }
 
   body.appendChild(
