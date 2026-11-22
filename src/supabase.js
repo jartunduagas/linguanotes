@@ -164,6 +164,12 @@ export async function closeGroup(groupId) {
   if (error) throw error;
 }
 
+export async function reopenGroup(groupId) {
+  const sb = await getClient();
+  const { error } = await sb.from("groups").update({ is_open: true, closed_at: null }).eq("id", groupId);
+  if (error) throw error;
+}
+
 export async function deleteGroup(groupId) {
   const sb = await getClient();
   const { error } = await sb.from("groups").delete().eq("id", groupId);

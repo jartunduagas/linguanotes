@@ -144,13 +144,16 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
     const person = pick(conj.persons);
     const table = { ...conj.conjugate(word.term, tense.id), ...(word.conjOverrides?.[tense.id] || {}) };
     const answer = table[person.id] || "";
+    // Aceptamos la forma completa ("je parle") Y también sin el pronombre/sujeto
+    // inicial ("parle"), para no obligar a escribir el pronombre.
+    const accept = [normalize(answer), ...conjugationVariants(answer).map(normalize)];
     return {
       wordId: word.id,
       kind,
       prompt: `Conjuga “${word.term}” — ${tense.label}, ${person.label}`,
-      hint: "Escribe la forma conjugada completa",
+      hint: "Puedes escribir con o sin el pronombre (ej. “je parle” o “parle”)",
       answer,
-      accept: [normalize(answer)],
+      accept: [...new Set(accept)],
     };
   }
 
@@ -218,6 +221,24 @@ export function normalize(str) {
 function splitAnswers(answer) {
   // Accept answers separated by "/", "," or ";" as alternatives.
   return (answer || "").split(/[\/,;]/).map((s) => s.trim()).filter(Boolean);
+}
+
+// Genera variantes aceptables de una forma conjugada, quitando el pronombre/sujeto
+// o partículas iniciales. Ej: "je parle" -> ["parle"]; "que j'aie parlé" -> ["j'aie parlé","aie parlé"].
+function conjugationVariants(answer) {
+  const variants = new Set();
+  let s = (answer || "").trim();
+  if (!s) return [];
+  // quitar "que " / "qu'" inicial (subjuntivo)
+  const noQue = s.replace(/^qu[e']\s*/i, "").trim();
+  if (noQue !== s) variants.add(noQue);
+  // pronombres/sujetos iniciales a quitar (FR, EN, PT)
+  const pron = /^(je\s|j'|tu\s|il\s|elle\s|nous\s|vous\s|ils\s|elles\s|on\s|i\s|you\s|he\s|she\s|it\s|we\s|they\s|eu\s|ele\s|ela\s|n[oó]s\s|v[oó]s\s|eles\s|elas\s|voc[eê]s?\s)/i;
+  for (const base of [s, noQue]) {
+    const stripped = base.replace(pron, "").trim();
+    if (stripped && stripped !== base) variants.add(stripped);
+  }
+  return [...variants];
 }
 
 // Extrae las preposiciones de un campo que puede incluir significados.

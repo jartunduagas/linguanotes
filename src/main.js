@@ -439,7 +439,8 @@ function renderConjTable(w) {
 
 /* ---- Formulario de palabra (modal) ---- */
 
-function openWordForm(initial) {
+function openWordForm(initial, options) {
+  options = options || {};
   const m = langMeta();
   const ls = langState();
   // Al añadir desde dentro de una categoría, esa viene preseleccionada.
@@ -504,7 +505,7 @@ function openWordForm(initial) {
     translateBtn.textContent = prev;
   });
 
-  function submit() {
+  async function submit() {
     if (!state.term.trim()) return;
     const payload = {
       term: state.term.trim(),
@@ -518,6 +519,12 @@ function openWordForm(initial) {
       prepositions: state.isVerb ? state.prepositions.filter((p) => p.prep && p.prep.trim()).map((p) => ({ prep: p.prep.trim(), use: (p.use || "").trim() })) : [],
       categoryId: state.categoryId,
     };
+    // Si hay un destino personalizado (ej. añadir a un grupo), usarlo.
+    if (options.onSave) {
+      try { await options.onSave(payload); close(); if (options.afterSave) options.afterSave(); }
+      catch (e) { alert("Error: " + e.message); }
+      return;
+    }
     if (initial) {
       Object.assign(initial, payload);
     } else {
@@ -547,47 +554,60 @@ function openWordForm(initial) {
   // --- Cuadros dinámicos de preposiciones ---
   // Cada fila: [ preposición ] [ para qué se usa ]. Al escribir en la última fila
   // vacía, aparece otra debajo automáticamente. Botón ✕ para quitar una fila.
+  // Dibuja las filas SIN recrearlas al escribir (para no perder el foco).
+  // Solo se añade una fila nueva al final cuando empiezas a llenar la última.
   function renderPrepRows(host) {
     clear(host);
-    // garantizar siempre una fila vacía al final
     if (state.prepositions.length === 0 || state.prepositions[state.prepositions.length - 1].prep.trim() !== "") {
       state.prepositions.push({ prep: "", use: "" });
     }
-    state.prepositions.forEach((row, idx) => {
-      const prepField = h("input", {
-        value: row.prep,
-        placeholder: "prep. (à, de…)",
-        style: { flex: "0 0 110px" },
-        oninput: (e) => {
-          row.prep = e.target.value;
-          // si se llenó la última fila, re-renderizar para añadir otra
-          if (idx === state.prepositions.length - 1 && e.target.value.trim()) renderPrepRows(host);
-        },
-      });
-      const useField = h("input", {
-        value: row.use,
-        placeholder: "¿para qué se usa? (opcional)",
-        oninput: (e) => (row.use = e.target.value),
-      });
-      const removeBtn = h("button", {
-        class: "btn small ghost",
-        title: "Quitar",
-        style: { flex: "0 0 auto" },
-        onclick: () => {
-          state.prepositions.splice(idx, 1);
-          renderPrepRows(host);
-        },
-      }, "✕");
-      // la fila vacía final no muestra el botón de quitar
-      const isLastEmpty = idx === state.prepositions.length - 1 && !row.prep.trim();
-      host.appendChild(
-        h("div", { class: "inline", style: { gap: "8px", marginBottom: "8px", alignItems: "center" } }, [
-          prepField,
-          useField,
-          isLastEmpty ? null : removeBtn,
-        ])
-      );
+    state.prepositions.forEach((row, idx) => host.appendChild(buildPrepRow(host, row, idx)));
+  }
+
+  function buildPrepRow(host, row, idx) {
+    let addedNext = false; // para no añadir más de una fila por esta
+    const prepField = h("input", {
+      value: row.prep,
+      placeholder: "prep. (à, de…)",
+      style: { flex: "0 0 110px" },
+      oninput: (e) => {
+        row.prep = e.target.value;
+        // Si esta era la última fila y ahora tiene texto, añadimos UNA fila nueva
+        // al final SIN tocar esta (así no se pierde el foco).
+        const isLast = idx === state.prepositions.length - 1;
+        if (isLast && e.target.value.trim() && !addedNext) {
+          addedNext = true;
+          const newRow = { prep: "", use: "" };
+          state.prepositions.push(newRow);
+          host.appendChild(buildPrepRow(host, newRow, state.prepositions.length - 1));
+          // mostrar el botón de quitar en la fila que acaba de dejar de ser la última
+          if (removeBtn.parentElement) removeBtn.style.display = "";
+        }
+      },
     });
+    const useField = h("input", {
+      value: row.use,
+      placeholder: "¿para qué se usa? (opcional)",
+      oninput: (e) => (row.use = e.target.value),
+    });
+    const removeBtn = h("button", {
+      class: "btn small ghost",
+      title: "Quitar",
+      style: { flex: "0 0 auto" },
+      onclick: () => {
+        const i = state.prepositions.indexOf(row);
+        if (i >= 0) state.prepositions.splice(i, 1);
+        renderPrepRows(host);
+      },
+    }, "✕");
+    // la fila vacía final no muestra el botón de quitar
+    const isLastEmpty = idx === state.prepositions.length - 1 && !row.prep.trim();
+    if (isLastEmpty) removeBtn.style.display = "none";
+    return h("div", { class: "inline", style: { gap: "8px", marginBottom: "8px", alignItems: "center" } }, [
+      prepField,
+      useField,
+      removeBtn,
+    ]);
   }
 
   function renderExtra() {
@@ -659,7 +679,8 @@ function openWordForm(initial) {
       h("div", {}, [h("label", {}, "🇪🇸 Español"), esInput]),
     ]),
     h("div", { class: "row", style: { marginBottom: "12px" } }, [
-      h("div", {}, [
+      // El selector de categoría no aplica al añadir a un grupo.
+      options.hideCategory ? null : h("div", {}, [
         h("label", {}, "Categoría"),
         h("select", { onchange: (e) => (state.categoryId = e.target.value) }, categoryOptions(state.categoryId)),
       ]),
@@ -1456,9 +1477,14 @@ function renderGroupDetail(groupId) {
   ]);
   if (mine) {
     const ownerActions = h("div", { class: "inline", style: { marginTop: "12px", gap: "8px" } }, [
-      g.is_open ? h("button", { class: "btn small", onclick: async () => {
-        try { await api.closeGroup(g.id); g.is_open = false; render(); } catch (e) { alert("Error: " + e.message); }
-      } }, "Cerrar grupo") : null,
+      // Cerrar o reabrir según el estado actual
+      g.is_open
+        ? h("button", { class: "btn small", onclick: async () => {
+            try { await api.closeGroup(g.id); g.is_open = false; render(); } catch (e) { alert("Error: " + e.message); }
+          } }, "Cerrar grupo")
+        : h("button", { class: "btn small primary", onclick: async () => {
+            try { await api.reopenGroup(g.id); g.is_open = true; render(); } catch (e) { alert("Error: " + e.message); }
+          } }, "Reabrir grupo"),
       h("button", { class: "btn small primary", onclick: () => openLiveQuizHost(g) }, "▶ Iniciar quiz en vivo"),
       h("button", { class: "btn small danger", onclick: async () => {
         if (!confirm("¿Borrar el grupo? Se perderán sus palabras.")) return;
@@ -1559,33 +1585,15 @@ function openJoinGroup() {
   setTimeout(() => codeInput.focus(), 0);
 }
 
-/* ---- Añadir palabra al grupo (reusa un formulario simple) ---- */
+/* ---- Añadir palabra al grupo (usa el formulario COMPLETO, como en Notas) ---- */
 function openAddGroupWord(g) {
-  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
-  const dismiss = openModal(body, () => dismiss());
-  const term = h("input", { placeholder: "la palabra" });
-  const en = h("input", { placeholder: "inglés" });
-  const es = h("input", { placeholder: "español" });
-  const status = h("div", { class: "muted", style: { minHeight: "16px" } }, "");
-  body.appendChild(h("h2", {}, "Añadir palabra al grupo"));
-  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Palabra"), term]));
-  body.appendChild(h("div", { class: "row", style: { marginBottom: "10px" } }, [
-    h("div", {}, [h("label", {}, "🇬🇧 Inglés"), en]),
-    h("div", {}, [h("label", {}, "🇪🇸 Español"), es]),
-  ]));
-  body.appendChild(status);
-  body.appendChild(h("div", { class: "modal-actions" }, [
-    h("button", { class: "btn ghost", onclick: () => dismiss() }, "Cancelar"),
-    h("button", { class: "btn primary", onclick: async () => {
-      if (!term.value.trim()) { status.textContent = "Escribe la palabra."; return; }
-      status.textContent = "Guardando…";
-      try {
-        await api.addGroupWord(g.id, { term: term.value.trim(), en: en.value.trim(), es: es.value.trim() });
-        dismiss(); render();
-      } catch (e) { status.style.color = "var(--bad)"; status.textContent = "Error: " + e.message; }
-    } }, "Añadir"),
-  ]));
-  setTimeout(() => term.focus(), 0);
+  openWordForm(null, {
+    hideCategory: true, // en un grupo no hay categorías
+    onSave: async (payload) => {
+      await api.addGroupWord(g.id, payload);
+    },
+    afterSave: () => render(), // recargar la lista de palabras del grupo
+  });
 }
 
 /* ---- Importar palabra del grupo a mis notas (eligiendo categoría) ---- */
