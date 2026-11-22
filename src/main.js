@@ -1779,6 +1779,7 @@ function startLiveQuizSession(session, group, role, groupWords) {
 
 function endLiveQuiz() {
   if (liveQuiz && liveQuiz.pollTimer) clearInterval(liveQuiz.pollTimer);
+  if (liveQuiz && liveQuiz.boardTimer) clearInterval(liveQuiz.boardTimer);
   liveQuiz = null;
   groupsState.openGroupId = null;
   render();
@@ -1801,18 +1802,42 @@ function renderLiveQuiz() {
     return wrap;
   }
 
-  // Controles del profesor
+  // Controles del profesor + marcador EN VIVO de cómo van los estudiantes
   if (lq.role === "host") {
+    const liveBoard = h("div", {}, [h("p", { class: "muted" }, "Cargando progreso…")]);
     wrap.appendChild(
       h("div", { class: "card" }, [
-        h("p", { class: "muted" }, "El quiz está en marcha. Los alumnos responden a su ritmo. Cuando quieras, termínalo para ver el ranking."),
-        h("div", { class: "inline", style: { gap: "8px" } }, [
+        h("p", { class: "muted" }, "El quiz está en marcha. Los alumnos responden a su ritmo. Abajo ves cómo van en tiempo real."),
+        h("div", { class: "inline", style: { gap: "8px", marginBottom: "6px" } }, [
           h("button", { class: "btn danger", onclick: async () => {
-            try { await api.finishQuiz(lq.session.id); lq.finished = true; render(); } catch (e) { alert("Error: " + e.message); }
+            try { await api.finishQuiz(lq.session.id); lq.finished = true; if (lq.boardTimer) clearInterval(lq.boardTimer); render(); } catch (e) { alert("Error: " + e.message); }
           } }, "⏹ Terminar quiz y ver ranking"),
         ]),
+        h("div", { class: "section-title", style: { fontSize: "14px" } }, "📊 Progreso en vivo"),
+        liveBoard,
       ])
     );
+
+    // Refrescar el marcador cada 4 segundos mientras el profe esté en esta pantalla.
+    const refreshBoard = async () => {
+      try {
+        const rows = await api.quizRanking(lq.session.id);
+        if (!liveQuiz || liveQuiz.finished) return;
+        clear(liveBoard);
+        if (!rows.length) { liveBoard.appendChild(h("p", { class: "muted" }, "Aún nadie ha respondido.")); return; }
+        rows.forEach((r) => {
+          liveBoard.appendChild(
+            h("div", { class: "rank-row", style: { padding: "8px 12px" } }, [
+              h("span", { class: "rank-name" }, r.display_name),
+              h("span", { class: "rank-score" }, `${r.correct}/${r.total}`),
+            ])
+          );
+        });
+      } catch (e) { /* silencioso */ }
+    };
+    refreshBoard();
+    if (lq.boardTimer) clearInterval(lq.boardTimer);
+    lq.boardTimer = setInterval(refreshBoard, 4000);
   }
 
   // Zona de preguntas (host también puede jugar mientras tanto)
