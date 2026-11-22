@@ -13,6 +13,7 @@ import {
 } from "./kanaQuiz.js";
 import { h, clear, openModal } from "./dom.js";
 import { autoTranslate, isTranslatable } from "./translate.js";
+import * as api from "./supabase.js";
 
 /* ===================== Estado global ===================== */
 
@@ -21,6 +22,9 @@ let currentTab = "notes";
 let search = "";
 let selectedCategory = null; // null = ver la lista de categorías; id = ver una categoría
 
+// Sesión de cuenta (null = no logueado). { user, profile }
+let account = null;
+
 // Estado de sesión de quiz (null = no iniciado)
 let quizSession = null;
 // Estado de kana
@@ -28,8 +32,16 @@ let kana = { setKey: "hiragana", mode: "reading", progress: loadKanaProgress(), 
 
 const root = document.getElementById("root");
 
+// Guardar: siempre en local; y si hay sesión, subir a la nube (con pequeño "debounce").
+let _syncTimer = null;
 function save() {
   storage.save(data);
+  if (account) {
+    clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(() => {
+      api.pushPersonalData(data).catch((e) => console.warn("No se pudo sincronizar:", e.message));
+    }, 1500);
+  }
 }
 function lang() {
   return data.settings.activeLanguage;
@@ -122,8 +134,22 @@ function renderTopbar() {
       ]),
       h("div", { class: "spacer" }),
       h("div", { class: "lang-select" }, [h("label", { style: { margin: 0 } }, "Idioma"), select]),
+      h("button", {
+        class: "btn small" + (account ? "" : " primary"),
+        style: { marginLeft: "8px" },
+        onclick: openAccount,
+        title: account ? "Tu cuenta" : "Iniciar sesión",
+      }, account ? `👤 ${truncate(account.profile?.display_name || "Cuenta", 12)}` : "Entrar"),
     ]),
   ]);
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function roleLabel(role) {
+  return { founder: "👑 Fundador", teacher: "🎓 Profesor", generic: "👤 Estudiante" }[role] || "👤 Estudiante";
 }
 
 function renderTabs() {
@@ -1343,6 +1369,170 @@ function esc(s) {
   return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+/* ===================== Cuenta (login / registro / perfil) ===================== */
+
+function openAccount() {
+  const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
+  const dismiss = openModal(body, () => dismiss());
+
+  if (account) {
+    renderAccountProfile(body, dismiss);
+  } else {
+    renderAuthForm(body, dismiss);
+  }
+}
+
+function renderAuthForm(body, dismiss) {
+  clear(body);
+  let mode = "login"; // 'login' | 'signup'
+  const status = h("div", { class: "muted", style: { minHeight: "18px", marginTop: "8px" } }, "");
+
+  const emailInput = h("input", { type: "email", placeholder: "tu correo", autocomplete: "email" });
+  const passInput = h("input", { type: "password", placeholder: "contraseña", autocomplete: "current-password" });
+  const nameInput = h("input", { placeholder: "nombre visible (ej. Juan A.)" });
+  const nameRow = h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Nombre"), nameInput]);
+
+  async function submit() {
+    const email = emailInput.value.trim();
+    const pass = passInput.value;
+    if (!email || !pass) { status.textContent = "Escribe correo y contraseña."; status.style.color = "var(--bad)"; return; }
+    status.style.color = "var(--text-dim)";
+    status.textContent = "Conectando…";
+    try {
+      if (mode === "signup") {
+        await api.signUp(email, pass, nameInput.value.trim() || "Estudiante");
+        status.style.color = "var(--good)";
+        status.textContent = "Cuenta creada. Iniciando sesión…";
+      }
+      await api.signIn(email, pass);
+      await refreshAccount();
+      // al entrar, fusionar/descargar notas de la nube
+      await syncOnLogin();
+      dismiss();
+      render();
+    } catch (e) {
+      status.style.color = "var(--bad)";
+      status.textContent = "⚠️ " + friendlyAuthError(e);
+    }
+  }
+
+  function rebuild() {
+    clear(body);
+    body.appendChild(h("h2", {}, mode === "login" ? "Iniciar sesión" : "Crear cuenta"));
+    body.appendChild(h("p", { class: "muted" }, "Tus notas se guardarán en la nube y podrás usarlas en el móvil y el PC. También podrás unirte a grupos."));
+    if (mode === "signup") body.appendChild(nameRow);
+    body.appendChild(h("div", { style: { marginBottom: "10px" } }, [h("label", {}, "Correo"), emailInput]));
+    body.appendChild(h("div", { style: { marginBottom: "6px" } }, [h("label", {}, "Contraseña"), passInput]));
+    body.appendChild(status);
+    body.appendChild(
+      h("div", { class: "modal-actions" }, [
+        h("button", { class: "btn ghost", onclick: () => { mode = mode === "login" ? "signup" : "login"; rebuild(); } },
+          mode === "login" ? "Crear cuenta" : "Ya tengo cuenta"),
+        h("button", { class: "btn primary", onclick: submit }, mode === "login" ? "Entrar" : "Registrarme"),
+      ])
+    );
+    passInput.onkeydown = (e) => { if (e.key === "Enter") submit(); };
+  }
+  rebuild();
+}
+
+function renderAccountProfile(body, dismiss) {
+  clear(body);
+  const p = account.profile || {};
+  body.appendChild(h("h2", {}, "Tu cuenta"));
+  body.appendChild(h("p", { class: "muted" }, `${account.user.email}`));
+  body.appendChild(
+    h("div", { class: "word", style: { marginBottom: "12px" } }, [
+      h("div", { class: "grow" }, [
+        h("div", {}, [document.createTextNode("Rol: "), h("b", {}, roleLabel(p.role))]),
+      ]),
+    ])
+  );
+
+  // Cambiar nombre visible
+  const nameInput = h("input", { value: p.display_name || "" });
+  body.appendChild(h("div", { style: { marginBottom: "10px" } }, [
+    h("label", {}, "Nombre visible"),
+    h("div", { class: "inline", style: { gap: "8px" } }, [
+      nameInput,
+      h("button", { class: "btn small", onclick: async () => {
+        try { await api.updateDisplayName(nameInput.value.trim() || "Estudiante"); await refreshAccount(); render(); }
+        catch (e) { alert("No se pudo guardar: " + e.message); }
+      } }, "Guardar"),
+    ]),
+  ]));
+
+  // Canjear código de profesor (solo si eres genérico)
+  if (p.role === "generic") {
+    const codeInput = h("input", { placeholder: "código de profesor" });
+    const codeStatus = h("div", { class: "muted", style: { fontSize: "12px", minHeight: "16px" } }, "");
+    body.appendChild(h("div", { style: { marginBottom: "10px" } }, [
+      h("label", {}, "¿Tienes un código de profesor?"),
+      h("div", { class: "inline", style: { gap: "8px" } }, [
+        codeInput,
+        h("button", { class: "btn small", onclick: async () => {
+          try {
+            const r = await api.redeemTeacherInvite(codeInput.value.trim());
+            const msgs = { ok: "✓ ¡Ahora eres profesor!", invalid: "Código no válido.", expired: "Código caducado.", used_up: "Código agotado." };
+            codeStatus.textContent = msgs[r] || r;
+            codeStatus.style.color = r === "ok" ? "var(--good)" : "var(--bad)";
+            if (r === "ok") { await refreshAccount(); render(); }
+          } catch (e) { codeStatus.textContent = "Error: " + e.message; codeStatus.style.color = "var(--bad)"; }
+        } }, "Canjear"),
+      ]),
+      codeStatus,
+    ]));
+  }
+
+  body.appendChild(
+    h("div", { class: "modal-actions" }, [
+      h("button", { class: "btn danger", onclick: async () => { await api.signOut(); account = null; dismiss(); render(); } }, "Cerrar sesión"),
+      h("button", { class: "btn primary", onclick: () => dismiss() }, "Listo"),
+    ])
+  );
+}
+
+function friendlyAuthError(e) {
+  const m = (e && e.message) || "";
+  if (/Invalid login/i.test(m)) return "Correo o contraseña incorrectos.";
+  if (/already registered/i.test(m)) return "Ese correo ya está registrado. Inicia sesión.";
+  if (/cargar Supabase/i.test(m)) return "Sin conexión. Necesitas internet para tu cuenta.";
+  if (/Password should be/i.test(m)) return "La contraseña es muy corta (mínimo 6).";
+  return m || "No se pudo completar.";
+}
+
+async function refreshAccount() {
+  try { account = await api.getSession(); } catch { account = null; }
+}
+
+// Al iniciar sesión: traer las notas de la nube. Si la nube tiene datos, usarlos;
+// si no, subir las locales actuales. (Estrategia simple: la nube manda si existe.)
+async function syncOnLogin() {
+  try {
+    const remote = await api.pullPersonalData();
+    if (remote && remote.data && remote.data.languages) {
+      data = storage.import(JSON.stringify(remote.data));
+    } else {
+      await api.pushPersonalData(data);
+    }
+  } catch (e) {
+    console.warn("Sync inicial falló:", e.message);
+  }
+}
+
 /* ===================== arranque ===================== */
+
+// Intentar recuperar sesión guardada al abrir (si hay internet). No bloquea la app.
+(async function initAccount() {
+  try {
+    await refreshAccount();
+    if (account) {
+      await syncOnLogin();
+      render();
+    }
+  } catch (e) {
+    // sin conexión: la app sigue en modo local, sin problema
+  }
+})();
 
 render();

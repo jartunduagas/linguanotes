@@ -6,7 +6,7 @@
 //   - Sirve los archivos desde la caché (rápido y offline).
 //   - Si hay internet, descarga la versión nueva por detrás para la próxima vez.
 
-const CACHE = "linguanotes-v6";
+const CACHE = "linguanotes-v7";
 
 // Rutas relativas para que funcione tanto en https://usuario.github.io/linguanotes/
 // como en la raíz de cualquier servidor.
@@ -24,6 +24,7 @@ const ASSETS = [
   "./src/quiz.js",
   "./src/kanaQuiz.js",
   "./src/translate.js",
+  "./src/supabase.js",
 ];
 
 // Instalar: precargar todos los archivos en la caché.
