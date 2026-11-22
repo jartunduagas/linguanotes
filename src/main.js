@@ -1660,11 +1660,13 @@ function renderAuthForm(body, dismiss, startMode) {
     togglePass.textContent = passInput.type === "password" ? "👁" : "🙈";
   });
 
-  // Muestra, cuando hace falta, un botón para reenviar el correo de confirmación.
+  // Botón único para reenviar el correo de confirmación (se crea una sola vez).
+  let resendBtn = null;
   function showResend(email) {
-    const btn = h("button", { class: "btn small ghost", style: { marginTop: "8px" } }, "Reenviar correo de confirmación");
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
+    if (resendBtn) return; // ya existe, no duplicar
+    resendBtn = h("button", { class: "btn small ghost", style: { marginTop: "8px" } }, "Reenviar correo de confirmación");
+    resendBtn.addEventListener("click", async () => {
+      resendBtn.disabled = true;
       try {
         await api.resendConfirmation(email);
         status.style.color = "var(--good)";
@@ -1673,9 +1675,9 @@ function renderAuthForm(body, dismiss, startMode) {
         status.style.color = "var(--bad)";
         status.textContent = "No se pudo reenviar: " + friendlyAuthError(e);
       }
-      btn.disabled = false;
+      resendBtn.disabled = false;
     });
-    status.after(btn);
+    status.after(resendBtn);
   }
 
   async function submit() {
@@ -1708,6 +1710,7 @@ function renderAuthForm(body, dismiss, startMode) {
 
   function rebuild() {
     clear(body);
+    resendBtn = null; // el body se limpia, así que olvidamos el botón anterior
     body.appendChild(h("h2", {}, mode === "login" ? "Iniciar sesión" : "Crear cuenta"));
     body.appendChild(h("p", { class: "muted" }, "Tus notas se guardarán en la nube y podrás usarlas en el móvil y el PC. También podrás unirte a grupos."));
     if (mode === "signup") body.appendChild(nameRow);
