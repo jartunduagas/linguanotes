@@ -279,3 +279,17 @@ label { font-size: 13px; color: var(--text-dim); display: block; margin-bottom: 
   line-height: 1.6;
   white-space: pre-wrap; /* respeta los saltos de línea del texto */
 }
+
+/* ---- Sugerencias de verbos (autocompletado en Conjugación) ---- */
+.suggest-box { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.suggest-item {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.suggest-item:hover { border-color: var(--crimson); color: var(--crimson-soft); }

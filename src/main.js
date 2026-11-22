@@ -904,64 +904,56 @@ function renderConjugation() {
 
   // tarjeta de vista previa
   const previewHost = h("div");
-  let preview = "";
+  const suggestHost = h("div", { class: "suggest-box" });
+  let preview = ""; // verbo actualmente mostrado ("" = ninguno)
 
-  // Verbos que el usuario ya tiene guardados (para elegirlos sin saberlos de memoria).
-  const myVerbs = ls.words.filter((w) => w.isVerb && w.term).map((w) => w.term);
+  // Verbos que el usuario ya tiene guardados (para sugerirlos).
+  const myVerbs = [...new Set(ls.words.filter((w) => w.isVerb && w.term).map((w) => w.term))];
 
-  // Selector desplegable de TUS verbos.
-  const verbSelect = h(
-    "select",
-    {
-      onchange: (e) => {
-        if (e.target.value) {
-          preview = e.target.value;
-          searchInput.value = "";
-          refreshVerbOptions("");
-          refreshPreview();
-        }
-      },
-    },
-    [h("option", { value: "" }, myVerbs.length ? "— elige uno de tus verbos —" : "— aún no tienes verbos —"), ...myVerbs.map((v) => h("option", { value: v }, v))]
-  );
-
-  // Buscador que ayuda a filtrar la lista de tus verbos.
+  // Un ÚNICO buscador: escribes y aparecen abajo tus verbos que coinciden.
   const searchInput = h("input", {
-    placeholder: "Busca entre tus verbos…",
+    placeholder: "busca un verbo nuevo",
     oninput: (e) => {
-      refreshVerbOptions(e.target.value);
-    },
-  });
-
-  function refreshVerbOptions(filter) {
-    const f = (filter || "").trim().toLowerCase();
-    const matches = myVerbs.filter((v) => v.toLowerCase().includes(f));
-    clear(verbSelect);
-    verbSelect.appendChild(h("option", { value: "" }, matches.length ? "— elige uno de tus verbos —" : "— sin coincidencias —"));
-    for (const v of matches) verbSelect.appendChild(h("option", { value: v }, v));
-  }
-
-  // Campo libre, por si quieres conjugar un verbo que aún no has guardado.
-  const freeInput = h("input", {
-    placeholder: `…o escribe cualquier verbo (ej. ${sampleVerb(m.id)})`,
-    oninput: (e) => {
-      preview = e.target.value;
+      preview = e.target.value.trim();
+      refreshSuggestions(e.target.value);
       refreshPreview();
     },
   });
 
+  function refreshSuggestions(filter) {
+    clear(suggestHost);
+    const f = (filter || "").trim().toLowerCase();
+    if (!f) return; // sin texto, no mostramos sugerencias
+    const matches = myVerbs.filter((v) => v.toLowerCase().includes(f) && v.toLowerCase() !== f).slice(0, 6);
+    if (!matches.length) return;
+    suggestHost.appendChild(h("div", { class: "muted", style: { fontSize: "12px", marginBottom: "4px" } }, "Tus verbos:"));
+    for (const v of matches) {
+      suggestHost.appendChild(
+        h("button", {
+          class: "suggest-item",
+          onclick: () => {
+            preview = v;
+            searchInput.value = v;
+            clear(suggestHost);
+            refreshPreview();
+          },
+        }, v)
+      );
+    }
+  }
+
   function refreshPreview() {
     clear(previewHost);
+    // Si no has escrito ningún verbo, NO mostramos nada.
+    if (!preview) return;
     if (ls.activeTenses.length === 0) {
       previewHost.appendChild(h("div", { class: "empty", style: { marginTop: "14px" } }, "Activa al menos un tiempo arriba para ver conjugaciones."));
       return;
     }
-    const verb = preview || myVerbs[0] || sampleVerb(m.id);
-    if (!verb) return;
     const tenses = conj.tenses.filter((t) => ls.activeTenses.includes(t.id));
     const box = h("div", { style: { marginTop: "14px" } });
     for (const t of tenses) {
-      const table = conj.conjugate(verb, t.id);
+      const table = conj.conjugate(preview, t.id);
       box.appendChild(
         h("div", { style: { marginBottom: "16px" } }, [
           h("div", { class: "muted", style: { fontWeight: 700, color: "var(--crimson-soft)" } }, t.label),
@@ -973,15 +965,13 @@ function renderConjugation() {
     }
     previewHost.appendChild(box);
   }
-  refreshPreview();
 
   wrap.appendChild(
     h("div", { class: "card" }, [
       h("div", { class: "section-title" }, "Ver conjugación de un verbo"),
-      h("p", { class: "muted" }, "Elige uno de tus verbos guardados (usa el buscador para encontrarlo) o escribe cualquier otro."),
-      h("div", { style: { marginBottom: "8px" } }, [searchInput]),
-      h("div", { style: { marginBottom: "8px" } }, [verbSelect]),
-      freeInput,
+      h("p", { class: "muted" }, "Escribe un verbo: te sugiere los tuyos que coincidan, y también conjuga cualquier verbo que escribas aunque no lo tengas guardado."),
+      searchInput,
+      suggestHost,
       previewHost,
     ])
   );
