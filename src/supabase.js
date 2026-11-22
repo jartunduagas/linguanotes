@@ -86,8 +86,14 @@ export async function getSession() {
   const sb = await getClient();
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return null;
-  const { data: profile } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
-  return { user: session.user, profile };
+  const { data: profile, error } = await sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+  if (error) {
+    console.warn("No se pudo leer el perfil:", error.message);
+  }
+  // Si por lo que sea no llega el perfil, al menos devolvemos un perfil mínimo
+  // usando el nombre de los metadatos, para que la app no quede sin datos.
+  const fallback = { id: session.user.id, display_name: session.user.user_metadata?.display_name || "Estudiante", role: "generic" };
+  return { user: session.user, profile: profile || fallback };
 }
 
 export async function updateDisplayName(name) {
