@@ -1684,12 +1684,19 @@ function renderAuthForm(body, dismiss, startMode) {
     const email = emailInput.value.trim();
     const pass = passInput.value;
     if (!email || !pass) { status.textContent = "Escribe correo y contraseña."; status.style.color = "var(--bad)"; return; }
+    // En el registro, el nombre es obligatorio (para que nunca quede vacío).
+    if (mode === "signup" && !nameInput.value.trim()) {
+      status.style.color = "var(--bad)";
+      status.textContent = "Escribe tu nombre visible.";
+      nameInput.focus();
+      return;
+    }
     status.style.color = "var(--text-dim)";
     status.textContent = "Conectando…";
     try {
       if (mode === "signup") {
         // Con confirmación de email activada, NO entramos directo: avisamos de revisar el correo.
-        await api.signUp(email, pass, nameInput.value.trim() || "Estudiante");
+        await api.signUp(email, pass, nameInput.value.trim());
         status.style.color = "var(--good)";
         status.textContent = "✓ Cuenta creada. Te enviamos un correo de confirmación: ábrelo, haz clic en el enlace y luego inicia sesión.";
         mode = "login"; // dejamos el formulario listo para iniciar sesión
@@ -1746,16 +1753,31 @@ function renderAccountProfile(body, dismiss) {
   );
 
   // Cambiar nombre visible
-  const nameInput = h("input", { value: p.display_name || "" });
+  const nameInput = h("input", { value: p.display_name || "", placeholder: "escribe tu nombre (ej. Juan Pablo)" });
+  const nameStatus = h("span", { class: "muted", style: { fontSize: "12px" } }, "");
   body.appendChild(h("div", { style: { marginBottom: "10px" } }, [
     h("label", {}, "Nombre visible"),
     h("div", { class: "inline", style: { gap: "8px" } }, [
       nameInput,
       h("button", { class: "btn small", onclick: async () => {
-        try { await api.updateDisplayName(nameInput.value.trim() || "Estudiante"); await refreshAccount(); render(); }
-        catch (e) { alert("No se pudo guardar: " + e.message); }
+        const v = nameInput.value.trim();
+        if (!v) { nameStatus.textContent = "Escribe un nombre."; nameStatus.style.color = "var(--bad)"; return; }
+        nameStatus.textContent = "Guardando…"; nameStatus.style.color = "var(--text-dim)";
+        try {
+          await api.updateDisplayName(v);
+          await refreshAccount();
+          nameStatus.textContent = "✓ Guardado";
+          nameStatus.style.color = "var(--good)";
+          // actualizar el botón del topbar sin cerrar el modal
+          const topBtn = document.querySelector(".topbar button[title='Tu cuenta']");
+          if (topBtn) topBtn.textContent = `👤 ${truncate(v, 12)}`;
+        } catch (e) {
+          nameStatus.textContent = "No se pudo guardar: " + e.message;
+          nameStatus.style.color = "var(--bad)";
+        }
       } }, "Guardar"),
     ]),
+    nameStatus,
   ]));
 
   // Canjear código de profesor (solo si eres genérico)
