@@ -1400,6 +1400,24 @@ function renderAuthForm(body, dismiss, startMode) {
     togglePass.textContent = passInput.type === "password" ? "👁" : "🙈";
   });
 
+  // Muestra, cuando hace falta, un botón para reenviar el correo de confirmación.
+  function showResend(email) {
+    const btn = h("button", { class: "btn small ghost", style: { marginTop: "8px" } }, "Reenviar correo de confirmación");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await api.resendConfirmation(email);
+        status.style.color = "var(--good)";
+        status.textContent = "✓ Correo reenviado. Revisa tu bandeja (y spam).";
+      } catch (e) {
+        status.style.color = "var(--bad)";
+        status.textContent = "No se pudo reenviar: " + friendlyAuthError(e);
+      }
+      btn.disabled = false;
+    });
+    status.after(btn);
+  }
+
   async function submit() {
     const email = emailInput.value.trim();
     const pass = passInput.value;
@@ -1408,19 +1426,23 @@ function renderAuthForm(body, dismiss, startMode) {
     status.textContent = "Conectando…";
     try {
       if (mode === "signup") {
+        // Con confirmación de email activada, NO entramos directo: avisamos de revisar el correo.
         await api.signUp(email, pass, nameInput.value.trim() || "Estudiante");
         status.style.color = "var(--good)";
-        status.textContent = "Cuenta creada. Iniciando sesión…";
+        status.textContent = "✓ Cuenta creada. Te enviamos un correo de confirmación: ábrelo, haz clic en el enlace y luego inicia sesión.";
+        mode = "login"; // dejamos el formulario listo para iniciar sesión
+        return;
       }
       await api.signIn(email, pass);
       await refreshAccount();
-      // al entrar, fusionar/descargar notas de la nube
       await syncOnLogin();
       dismiss();
       render();
     } catch (e) {
       status.style.color = "var(--bad)";
       status.textContent = "⚠️ " + friendlyAuthError(e);
+      // Si el problema es que el correo no está confirmado, ofrecer reenviar.
+      if (/email not confirmed/i.test((e && e.message) || "")) showResend(email);
     }
   }
 
@@ -1505,7 +1527,7 @@ function renderAccountProfile(body, dismiss) {
 
 function friendlyAuthError(e) {
   const m = (e && e.message) || "";
-  if (/email not confirmed/i.test(m)) return "Tu correo no está confirmado. (El administrador debe desactivar la confirmación de email en Supabase, o confirmarlo.)";
+  if (/email not confirmed/i.test(m)) return "Aún no has confirmado tu correo. Abre el enlace que te enviamos (revisa también spam).";
   if (/Invalid login/i.test(m)) return "Correo o contraseña incorrectos.";
   if (/already registered|User already/i.test(m)) return "Ese correo ya está registrado. Inicia sesión.";
   if (/cargar Supabase/i.test(m)) return "Sin conexión. Necesitas internet para tu cuenta.";

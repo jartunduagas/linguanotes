@@ -48,7 +48,11 @@ export async function signUp(email, password, displayName) {
   const { data, error } = await sb.auth.signUp({
     email,
     password,
-    options: { data: { display_name: displayName || "Estudiante" } },
+    options: {
+      data: { display_name: displayName || "Estudiante" },
+      // al confirmar desde el correo, el alumno vuelve a la app
+      emailRedirectTo: window.location.origin + window.location.pathname,
+    },
   });
   if (error) throw error;
   return data;
@@ -59,6 +63,17 @@ export async function signIn(email, password) {
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
+}
+
+// Reenviar el correo de confirmación (por si no llegó el primero).
+export async function resendConfirmation(email) {
+  const sb = await getClient();
+  const { error } = await sb.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: window.location.origin + window.location.pathname },
+  });
+  if (error) throw error;
 }
 
 export async function signOut() {
