@@ -32,16 +32,16 @@
 const STORAGE_KEY = "linguanotes.v1";
 
 const DEFAULT_CATEGORIES = [
-  { id: "verbs", name: "Verbs" },
-  { id: "vocabulary", name: "Vocabulary" },
-  { id: "phrases", name: "Phrases" },
+  { id: "verbs", name: "Verbos" },
+  { id: "vocabulary", name: "Vocabulario" },
+  { id: "phrases", name: "Frases" },
 ];
 
 export const LANGUAGES = [
-  { id: "french", label: "French", flag: "🇫🇷", hasConjugation: true },
-  { id: "english", label: "English", flag: "🇬🇧", hasConjugation: true },
-  { id: "portuguese", label: "Portuguese", flag: "🇵🇹", hasConjugation: true },
-  { id: "japanese", label: "Japanese", flag: "🇯🇵", hasConjugation: false },
+  { id: "french", label: "Francés", flag: "🇫🇷", hasConjugation: true },
+  { id: "english", label: "Inglés", flag: "🇬🇧", hasConjugation: true },
+  { id: "portuguese", label: "Portugués", flag: "🇵🇹", hasConjugation: true },
+  { id: "japanese", label: "Japonés", flag: "🇯🇵", hasConjugation: false },
 ];
 
 function freshLanguageState() {
@@ -211,7 +211,9 @@ function normalizeWord(w) {
     isVerb: Boolean(w.isVerb),
     isNoun: Boolean(w.isNoun),       // sustantivo (para el quiz de género)
     gender: w.gender || "",          // "m" | "f" | "" (le / la)
-    preposition: w.preposition || "", // preposición que rige el verbo (quiz de preposición)
+    // Preposiciones: array estructurado [{ prep, use }]. Se convierte desde el
+    // formato antiguo (string "à = jugar / de = tocar") si hiciera falta.
+    prepositions: normalizePrepositions(w),
     isRule: Boolean(w.isRule),       // es una "chuleta"/regla (apartado de Reglas)
     ruleBody: w.ruleBody || "",      // texto de la regla (cuando isRule)
     conjOverrides: w.conjOverrides || {},
@@ -224,6 +226,26 @@ function normalizeWord(w) {
       createdAt: (w.stats && w.stats.createdAt) || Date.now(),
     },
   };
+}
+
+// Devuelve siempre un array [{ prep, use }].
+// Acepta el nuevo formato (w.prepositions) o convierte el antiguo (w.preposition string).
+function normalizePrepositions(w) {
+  if (Array.isArray(w.prepositions)) {
+    return w.prepositions
+      .map((p) => ({ prep: (p.prep || "").trim(), use: (p.use || "").trim() }))
+      .filter((p) => p.prep);
+  }
+  const raw = (w.preposition || "").trim();
+  if (!raw) return [];
+  // "à = jugar / de = tocar"  ->  [{prep:"à", use:"jugar"}, {prep:"de", use:"tocar"}]
+  return raw
+    .split(/[\/,;]/)
+    .map((part) => {
+      const [prepPart, ...rest] = part.split(/[=:(]/);
+      return { prep: (prepPart || "").trim(), use: rest.join("=").replace(/\)$/, "").trim() };
+    })
+    .filter((p) => p.prep);
 }
 
 export function genId() {

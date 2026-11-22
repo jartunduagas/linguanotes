@@ -68,7 +68,8 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   const conj = CONJUGATORS[languageId];
   const canConjugate = word.isVerb && conj && activeTenses && activeTenses.length > 0;
   const hasGender = word.isNoun && (word.gender === "m" || word.gender === "f");
-  const hasPrep = word.isVerb && word.preposition && word.preposition.trim();
+  const prepList = Array.isArray(word.prepositions) ? word.prepositions.filter((p) => p.prep) : [];
+  const hasPrep = word.isVerb && prepList.length > 0;
 
   const transKinds = [];
   if (word.en) transKinds.push("term_to_en", "en_to_term");
@@ -116,8 +117,9 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
   }
 
   if (kind === "preposition") {
-    const parsed = parsePrepositions(word.preposition);
-    const correct = parsed.preps;             // puede haber más de una correcta
+    const correct = prepList.map((p) => p.prep);  // preposiciones correctas
+    // Texto a mostrar al revelar: "à (jugar) / de (tocar)"
+    const answerText = prepList.map((p) => (p.use ? `${p.prep} (${p.use})` : p.prep)).join(" / ");
     // Opción múltiple con SELECCIÓN MANUAL: debes marcar exactamente las correctas.
     const options = buildPrepOptions(correct);
     return {
@@ -130,7 +132,7 @@ export function buildQuestion(word, languageId, activeTenses, mode = "mixed") {
         correct.length > 1
           ? `Rige varias (${correct.length}). Marca todas las correctas y pulsa Comprobar.`
           : "Marca la preposición correcta y pulsa Comprobar.",
-      answer: word.preposition, // texto completo con significados (al revelar)
+      answer: answerText, // texto completo con significados (al revelar)
       options,
       correctSet: correct.map(normalize), // conjunto exacto a acertar
     };
@@ -185,7 +187,7 @@ export function buildQuiz(words, languageId, activeTenses, count = 10, mode = "m
     pool = words.filter((w) => w.isNoun && (w.gender === "m" || w.gender === "f"));
     if (!pool.length) return [];
   } else if (mode === "preposition") {
-    pool = words.filter((w) => w.isVerb && w.preposition && w.preposition.trim());
+    pool = words.filter((w) => w.isVerb && Array.isArray(w.prepositions) && w.prepositions.some((p) => p.prep));
     if (!pool.length) return [];
   }
 

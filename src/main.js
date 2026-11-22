@@ -44,6 +44,19 @@ function isJapanese() {
   return lang() === "japanese";
 }
 
+// Opciones de <select> de categorías, con subcategorías indentadas debajo de su padre.
+function categoryOptions(selectedId) {
+  const ls = langState();
+  const opts = [];
+  for (const c of ls.categories.filter((x) => !x.parentId)) {
+    opts.push(h("option", { value: c.id, selected: c.id === selectedId }, c.name));
+    for (const sub of ls.categories.filter((x) => x.parentId === c.id)) {
+      opts.push(h("option", { value: sub.id, selected: sub.id === selectedId }, `\u00A0\u00A0↳ ${sub.name}`));
+    }
+  }
+  return opts;
+}
+
 /* ===================== Render principal ===================== */
 
 function render() {
@@ -200,57 +213,75 @@ function renderNotesList() {
     return host;
   }
 
-  // --- Vista de UNA categoría seleccionada: solo sus palabras ---
+  const known = new Set(ls.categories.map((c) => c.id));
+  const childrenOf = (id) => ls.categories.filter((c) => c.parentId === id);
+
+  // --- Vista de UNA categoría seleccionada ---
   if (selectedCategory) {
-    const known = new Set(ls.categories.map((c) => c.id));
     const cat = ls.categories.find((c) => c.id === selectedCategory) || { id: "__u", name: "Sin categoría" };
+    const subs = selectedCategory === "__u" ? [] : childrenOf(selectedCategory);
     const items =
       selectedCategory === "__u"
         ? ls.words.filter((w) => !known.has(w.categoryId))
         : ls.words.filter((w) => w.categoryId === selectedCategory);
 
+    // cabecera con botón volver (al nivel correcto)
+    const parent = cat.parentId ? ls.categories.find((c) => c.id === cat.parentId) : null;
     host.appendChild(
       h("div", { class: "cat-head", style: { marginBottom: "14px" } }, [
         h("button", {
           class: "btn ghost small",
           onclick: () => {
-            selectedCategory = null;
+            selectedCategory = parent ? parent.id : null;
             render();
           },
-        }, "← Categorías"),
+        }, parent ? `← ${parent.name}` : "← Categorías"),
         h("h3", { style: { margin: 0 } }, cat.name),
-        h("span", { class: "badge" }, String(items.length)),
       ])
     );
 
-    if (!items.length) {
-      host.appendChild(h("div", { class: "empty", html: `No hay palabras en <b>${esc(cat.name)}</b> todavía. Pulsa “+ Añadir palabra”.` }));
-    } else {
+    // subcategorías (si las hay) como tarjetas
+    if (subs.length) {
+      host.appendChild(h("p", { class: "muted" }, "Subcategorías:"));
+      const subGrid = h("div", { class: "cat-grid" });
+      for (const s of subs) {
+        subGrid.appendChild(
+          h("button", { class: "cat-card", onclick: () => { selectedCategory = s.id; render(); } }, [
+            h("div", { class: "cat-card-name" }, s.name),
+            h("div", { class: "cat-card-count" }, `${countInCategory(s.id)} palabra${countInCategory(s.id) === 1 ? "" : "s"}`),
+          ])
+        );
+      }
+      host.appendChild(subGrid);
+    }
+
+    // palabras directas de esta categoría
+    if (items.length) {
+      if (subs.length) host.appendChild(h("p", { class: "muted", style: { marginTop: "16px" } }, "Palabras aquí:"));
       items.forEach((w) => host.appendChild(renderWordRow(w)));
+    } else if (!subs.length) {
+      host.appendChild(h("div", { class: "empty", html: `No hay palabras en <b>${esc(cat.name)}</b> todavía. Pulsa “+ Añadir palabra”.` }));
     }
     return host;
   }
 
-  // --- Vista principal: TARJETAS de categorías (entras a una para ver sus palabras) ---
-  host.appendChild(h("p", { class: "muted" }, "Elige una categoría para ver sus palabras:"));
+  // --- Vista principal: tarjetas de categorías PRINCIPALES (sin parentId) ---
+  host.appendChild(h("p", { class: "muted" }, "Elige una categoría:"));
   const grid = h("div", { class: "cat-grid" });
-  const known = new Set(ls.categories.map((c) => c.id));
-  const cats = [...ls.categories];
+  const cats = ls.categories.filter((c) => !c.parentId);
   const orphanCount = ls.words.filter((w) => !known.has(w.categoryId)).length;
   if (orphanCount) cats.push({ id: "__u", name: "Sin categoría" });
 
   for (const c of cats) {
+    const subCount = c.id === "__u" ? 0 : childrenOf(c.id).length;
     const count = countInCategory(c.id);
     grid.appendChild(
       h("button", {
         class: "cat-card",
-        onclick: () => {
-          selectedCategory = c.id;
-          render();
-        },
+        onclick: () => { selectedCategory = c.id; render(); },
       }, [
         h("div", { class: "cat-card-name" }, c.name),
-        h("div", { class: "cat-card-count" }, `${count} palabra${count === 1 ? "" : "s"}`),
+        h("div", { class: "cat-card-count" }, subCount ? `${subCount} subcat. · ${count} palabra${count === 1 ? "" : "s"}` : `${count} palabra${count === 1 ? "" : "s"}`),
       ])
     );
   }
@@ -293,7 +324,9 @@ function renderWordRow(w) {
       w.isNoun && genderArticle ? h("span", { class: "badge pill-gender" }, genderArticle) : null,
     ]),
     h("div", { class: "trans", html: `🇬🇧 <b>${esc(w.en) || "—"}</b> &nbsp;·&nbsp; 🇪🇸 <b>${esc(w.es) || "—"}</b>` }),
-    w.isVerb && w.preposition ? h("div", { class: "trans faint" }, `🔗 ${w.preposition}`) : null,
+    w.isVerb && Array.isArray(w.prepositions) && w.prepositions.length
+      ? h("div", { class: "trans faint" }, "🔗 " + w.prepositions.map((p) => (p.use ? `${p.prep} (${p.use})` : p.prep)).join(" · "))
+      : null,
     w.notes ? h("div", { class: "trans faint" }, `📝 ${w.notes}`) : null,
   ]);
 
@@ -388,7 +421,8 @@ function openWordForm(initial) {
     isVerb: initial?.isVerb || false,
     isNoun: initial?.isNoun || false,
     gender: initial?.gender || "",
-    preposition: initial?.preposition || "",
+    // array de { prep, use }
+    prepositions: Array.isArray(initial?.prepositions) ? initial.prepositions.map((p) => ({ ...p })) : [],
     categoryId: defaultCat,
   };
 
@@ -420,8 +454,17 @@ function openWordForm(initial) {
     const r = await autoTranslate(state.term, m.id);
     if (r.en) { state.en = r.en; enInput.value = r.en; }
     if (r.es) { state.es = r.es; esInput.value = r.es; }
-    transStatus.textContent = r.error ? "⚠️ " + r.error : "✓ Traducido (puedes corregirlo).";
-    transStatus.style.color = r.error ? "var(--bad)" : "var(--good)";
+    if (r.error) {
+      transStatus.textContent = "⚠️ " + r.error;
+      transStatus.style.color = "var(--bad)";
+    } else if (r.warning) {
+      // Posible error ortográfico: avisamos, pero el usuario puede guardar igual.
+      transStatus.textContent = "⚠️ " + r.warning;
+      transStatus.style.color = "var(--crimson-soft)";
+    } else {
+      transStatus.textContent = "✓ Traducido (puedes corregirlo).";
+      transStatus.style.color = "var(--good)";
+    }
     translateBtn.disabled = false;
     translateBtn.textContent = prev;
   });
@@ -436,7 +479,8 @@ function openWordForm(initial) {
       isVerb: state.isVerb,
       isNoun: state.isNoun,
       gender: state.isNoun ? state.gender : "",
-      preposition: state.isVerb ? state.preposition.trim() : "",
+      // guardar solo las preposiciones con contenido
+      prepositions: state.isVerb ? state.prepositions.filter((p) => p.prep && p.prep.trim()).map((p) => ({ prep: p.prep.trim(), use: (p.use || "").trim() })) : [],
       categoryId: state.categoryId,
     };
     if (initial) {
@@ -465,11 +509,51 @@ function openWordForm(initial) {
       h("option", { value: "f", selected: state.gender === "f" }, m.id === "french" ? "Femenino (la)" : "Femenino (a)"),
     ]
   );
-  const prepInput = h("input", {
-    value: state.preposition,
-    placeholder: "ej. à  ·  de  ·  à/de = jugar/tocar",
-    oninput: (e) => (state.preposition = e.target.value),
-  });
+  // --- Cuadros dinámicos de preposiciones ---
+  // Cada fila: [ preposición ] [ para qué se usa ]. Al escribir en la última fila
+  // vacía, aparece otra debajo automáticamente. Botón ✕ para quitar una fila.
+  function renderPrepRows(host) {
+    clear(host);
+    // garantizar siempre una fila vacía al final
+    if (state.prepositions.length === 0 || state.prepositions[state.prepositions.length - 1].prep.trim() !== "") {
+      state.prepositions.push({ prep: "", use: "" });
+    }
+    state.prepositions.forEach((row, idx) => {
+      const prepField = h("input", {
+        value: row.prep,
+        placeholder: "prep. (à, de…)",
+        style: { flex: "0 0 110px" },
+        oninput: (e) => {
+          row.prep = e.target.value;
+          // si se llenó la última fila, re-renderizar para añadir otra
+          if (idx === state.prepositions.length - 1 && e.target.value.trim()) renderPrepRows(host);
+        },
+      });
+      const useField = h("input", {
+        value: row.use,
+        placeholder: "¿para qué se usa? (opcional)",
+        oninput: (e) => (row.use = e.target.value),
+      });
+      const removeBtn = h("button", {
+        class: "btn small ghost",
+        title: "Quitar",
+        style: { flex: "0 0 auto" },
+        onclick: () => {
+          state.prepositions.splice(idx, 1);
+          renderPrepRows(host);
+        },
+      }, "✕");
+      // la fila vacía final no muestra el botón de quitar
+      const isLastEmpty = idx === state.prepositions.length - 1 && !row.prep.trim();
+      host.appendChild(
+        h("div", { class: "inline", style: { gap: "8px", marginBottom: "8px", alignItems: "center" } }, [
+          prepField,
+          useField,
+          isLastEmpty ? null : removeBtn,
+        ])
+      );
+    });
+  }
 
   function renderExtra() {
     clear(extraHost);
@@ -482,11 +566,13 @@ function openWordForm(initial) {
       );
     }
     if (state.isVerb) {
+      const prepHost = h("div");
+      renderPrepRows(prepHost);
       extraHost.appendChild(
         h("div", { style: { marginBottom: "12px" } }, [
-          h("label", {}, "Preposición que rige (opcional)"),
-          prepInput,
-          h("div", { class: "muted", style: { fontSize: "12px", marginTop: "4px" } }, "Puedes poner varias con su significado, ej. “à = jugar / de = tocar”."),
+          h("label", {}, "Preposiciones que rige (opcional)"),
+          prepHost,
+          h("div", { class: "muted", style: { fontSize: "12px" } }, "Escribe una preposición y aparecerá otra casilla para añadir más."),
         ])
       );
     }
@@ -540,7 +626,7 @@ function openWordForm(initial) {
     h("div", { class: "row", style: { marginBottom: "12px" } }, [
       h("div", {}, [
         h("label", {}, "Categoría"),
-        h("select", { onchange: (e) => (state.categoryId = e.target.value) }, ls.categories.map((c) => h("option", { value: c.id, selected: c.id === state.categoryId }, c.name))),
+        h("select", { onchange: (e) => (state.categoryId = e.target.value) }, categoryOptions(state.categoryId)),
       ]),
       typeControls.length ? h("div", {}, [h("label", {}, "Tipo"), ...typeControls]) : null,
     ]),
@@ -605,7 +691,7 @@ function openRuleForm(initial) {
     h("div", { style: { marginBottom: "12px" } }, [h("label", {}, "Contenido"), bodyInput]),
     h("div", { style: { marginBottom: "4px" } }, [
       h("label", {}, "Categoría"),
-      h("select", { onchange: (e) => (state.categoryId = e.target.value) }, ls.categories.map((c) => h("option", { value: c.id, selected: c.id === state.categoryId }, c.name))),
+      h("select", { onchange: (e) => (state.categoryId = e.target.value) }, categoryOptions(state.categoryId)),
     ]),
     h("div", { class: "modal-actions" }, [
       h("button", { class: "btn ghost", onclick: () => close() }, "Cancelar"),
@@ -623,51 +709,119 @@ function openCategories() {
   const ls = langState();
   const body = h("div", { class: "modal card", onclick: (e) => e.stopPropagation() });
 
+  const countIn = (id) => ls.words.filter((w) => w.categoryId === id).length;
+  const isTop = (c) => !c.parentId;
+  const childrenOf = (id) => ls.categories.filter((c) => c.parentId === id);
+
   function rebuild() {
     clear(body);
+    body.appendChild(h("h2", {}, "Categorías"));
+    body.appendChild(h("p", { class: "muted" }, "Renombra, crea subcategorías o borra. Toca el nombre para editarlo."));
+
+    // crear categoría principal nueva
     const nameInput = h("input", {
       class: "grow",
-      placeholder: "Nombre de categoría nueva",
+      placeholder: "Nueva categoría principal",
       onkeydown: (e) => {
-        if (e.key === "Enter" && e.target.value.trim()) addCat(e.target.value.trim(), nameInput);
+        if (e.key === "Enter" && e.target.value.trim()) addCat(e.target.value.trim(), null, nameInput);
       },
     });
-    body.appendChild(h("h2", {}, "Categorías"));
-    body.appendChild(h("p", { class: "muted" }, "Organiza tus notas como quieras."));
     body.appendChild(
       h("div", { class: "inline", style: { marginBottom: "16px" } }, [
         nameInput,
-        h("button", { class: "btn primary", onclick: () => nameInput.value.trim() && addCat(nameInput.value.trim(), nameInput) }, "Añadir"),
+        h("button", { class: "btn primary", onclick: () => nameInput.value.trim() && addCat(nameInput.value.trim(), null, nameInput) }, "Añadir"),
       ])
     );
-    for (const c of ls.categories) {
-      const count = ls.words.filter((w) => w.categoryId === c.id).length;
-      body.appendChild(
-        h("div", { class: "word" }, [
-          h("div", { class: "grow", html: `<b>${esc(c.name)}</b> <span class="badge">${count} palabras</span>` }),
-          h("button", {
-            class: "btn small danger",
-            title: "Las palabras pasan a la primera categoría",
-            onclick: () => {
-              ls.categories = ls.categories.filter((x) => x.id !== c.id);
-              const fallback = ls.categories[0]?.id || "vocabulary";
-              ls.words.forEach((w) => {
-                if (w.categoryId === c.id) w.categoryId = fallback;
-              });
-              save();
-              rebuild();
-            },
-          }, "Borrar"),
-        ])
-      );
+
+    // listar categorías principales con sus subcategorías
+    for (const c of ls.categories.filter(isTop)) {
+      body.appendChild(renderCatRow(c, false));
+      // input inline para crear subcategoría (si se pulsó "+ sub" en esta categoría)
+      if (addingSubFor === c.id) {
+        const subInput = h("input", {
+          placeholder: `Nombre de subcategoría en “${c.name}”`,
+          style: { marginLeft: "24px", maxWidth: "260px" },
+          onkeydown: (e) => {
+            if (e.key === "Enter" && e.target.value.trim()) { const v = e.target.value.trim(); addingSubFor = null; addCat(v, c.id); }
+            if (e.key === "Escape") { addingSubFor = null; rebuild(); }
+          },
+        });
+        body.appendChild(
+          h("div", { class: "inline", style: { marginLeft: "24px", marginBottom: "8px", gap: "8px" } }, [
+            subInput,
+            h("button", { class: "btn small primary", onclick: () => { if (subInput.value.trim()) { const v = subInput.value.trim(); addingSubFor = null; addCat(v, c.id); } } }, "Añadir"),
+            h("button", { class: "btn small ghost", onclick: () => { addingSubFor = null; rebuild(); } }, "Cancelar"),
+          ])
+        );
+      }
+      for (const sub of childrenOf(c.id)) {
+        body.appendChild(renderCatRow(sub, true));
+      }
     }
+
     body.appendChild(h("div", { class: "modal-actions" }, [h("button", { class: "btn primary", onclick: () => close() }, "Listo")]));
   }
 
-  function addCat(name, input) {
-    ls.categories.push({ id: genId(), name });
+  function renderCatRow(c, isSub) {
+    const nameSpan = h("b", { style: { cursor: "pointer" }, title: "Toca para renombrar" }, c.name);
+    nameSpan.addEventListener("click", () => startRename(c, nameSpan));
+    const actions = [];
+    // solo las principales pueden tener subcategorías
+    if (!isSub) {
+      actions.push(h("button", { class: "btn small ghost", title: "Añadir subcategoría", onclick: () => addSub(c) }, "+ sub"));
+    }
+    actions.push(
+      h("button", {
+        class: "btn small danger",
+        title: isSub ? "Borrar subcategoría" : "Borrar (sus palabras y subcategorías pasan a otra categoría)",
+        onclick: () => deleteCat(c),
+      }, "Borrar")
+    );
+    return h("div", { class: "word", style: isSub ? { marginLeft: "24px" } : {} }, [
+      h("div", { class: "grow" }, [
+        isSub ? document.createTextNode("↳ ") : null,
+        nameSpan,
+        document.createTextNode(" "),
+        h("span", { class: "badge" }, `${countIn(c.id)} palabras`),
+      ]),
+      h("div", { class: "actions" }, actions),
+    ]);
+  }
+
+  function startRename(c, nameSpan) {
+    const input = h("input", { value: c.name, style: { maxWidth: "200px" } });
+    const commit = () => {
+      const v = input.value.trim();
+      if (v) { c.name = v; save(); }
+      rebuild();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") rebuild(); });
+    input.addEventListener("blur", commit);
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  function addCat(name, parentId, input) {
+    ls.categories.push({ id: genId(), name, parentId: parentId || undefined });
     save();
-    input.value = "";
+    if (input) input.value = "";
+    rebuild();
+  }
+
+  let addingSubFor = null; // id de la categoría a la que estamos añadiendo subcategoría
+  function addSub(parent) {
+    addingSubFor = parent.id;
+    rebuild();
+  }
+
+  function deleteCat(c) {
+    // reasignar palabras de esta categoría (y de sus subcategorías) a la primera principal
+    const fallback = ls.categories.find((x) => isTop(x) && x.id !== c.id)?.id || "vocabulary";
+    const toRemove = new Set([c.id, ...childrenOf(c.id).map((s) => s.id)]);
+    ls.categories = ls.categories.filter((x) => !toRemove.has(x.id));
+    ls.words.forEach((w) => { if (toRemove.has(w.categoryId)) w.categoryId = fallback; });
+    save();
     rebuild();
   }
 
@@ -716,20 +870,58 @@ function renderConjugation() {
   // tarjeta de vista previa
   const previewHost = h("div");
   let preview = "";
-  const input = h("input", {
-    placeholder: `un verbo en ${m.label}, ej. ${sampleVerb(m.id)}`,
+
+  // Verbos que el usuario ya tiene guardados (para elegirlos sin saberlos de memoria).
+  const myVerbs = ls.words.filter((w) => w.isVerb && w.term).map((w) => w.term);
+
+  // Selector desplegable de TUS verbos.
+  const verbSelect = h(
+    "select",
+    {
+      onchange: (e) => {
+        if (e.target.value) {
+          preview = e.target.value;
+          searchInput.value = "";
+          refreshVerbOptions("");
+          refreshPreview();
+        }
+      },
+    },
+    [h("option", { value: "" }, myVerbs.length ? "— elige uno de tus verbos —" : "— aún no tienes verbos —"), ...myVerbs.map((v) => h("option", { value: v }, v))]
+  );
+
+  // Buscador que ayuda a filtrar la lista de tus verbos.
+  const searchInput = h("input", {
+    placeholder: "Busca entre tus verbos…",
+    oninput: (e) => {
+      refreshVerbOptions(e.target.value);
+    },
+  });
+
+  function refreshVerbOptions(filter) {
+    const f = (filter || "").trim().toLowerCase();
+    const matches = myVerbs.filter((v) => v.toLowerCase().includes(f));
+    clear(verbSelect);
+    verbSelect.appendChild(h("option", { value: "" }, matches.length ? "— elige uno de tus verbos —" : "— sin coincidencias —"));
+    for (const v of matches) verbSelect.appendChild(h("option", { value: v }, v));
+  }
+
+  // Campo libre, por si quieres conjugar un verbo que aún no has guardado.
+  const freeInput = h("input", {
+    placeholder: `…o escribe cualquier verbo (ej. ${sampleVerb(m.id)})`,
     oninput: (e) => {
       preview = e.target.value;
       refreshPreview();
     },
   });
+
   function refreshPreview() {
     clear(previewHost);
     if (ls.activeTenses.length === 0) {
       previewHost.appendChild(h("div", { class: "empty", style: { marginTop: "14px" } }, "Activa al menos un tiempo arriba para ver conjugaciones."));
       return;
     }
-    const verb = preview || ls.words.filter((w) => w.isVerb)[0]?.term || sampleVerb(m.id);
+    const verb = preview || myVerbs[0] || sampleVerb(m.id);
     if (!verb) return;
     const tenses = conj.tenses.filter((t) => ls.activeTenses.includes(t.id));
     const box = h("div", { style: { marginTop: "14px" } });
@@ -750,9 +942,11 @@ function renderConjugation() {
 
   wrap.appendChild(
     h("div", { class: "card" }, [
-      h("div", { class: "section-title" }, "Vista previa de conjugación"),
-      h("p", { class: "muted" }, `Escribe cualquier verbo en ${m.label} para verlo conjugado en tus tiempos activos.`),
-      input,
+      h("div", { class: "section-title" }, "Ver conjugación de un verbo"),
+      h("p", { class: "muted" }, "Elige uno de tus verbos guardados (usa el buscador para encontrarlo) o escribe cualquier otro."),
+      h("div", { style: { marginBottom: "8px" } }, [searchInput]),
+      h("div", { style: { marginBottom: "8px" } }, [verbSelect]),
+      freeInput,
       previewHost,
     ])
   );
@@ -812,14 +1006,51 @@ function renderQuiz() {
     if (canConj) types.push({ id: "preposition", label: "🔗 Preposición", desc: "¿Qué preposición rige el verbo?" });
 
     let chosenType = "mixed";
+    // Tiempos elegidos para el quiz de conjugación (por defecto, todos los activos).
+    const conj = CONJUGATORS[m.id];
+    let chosenTenses = [...ls.activeTenses];
+
+    // Host para el selector de tiempos (solo visible con tipo "conjugación").
+    const tenseHost = h("div");
+    function renderTensePicker() {
+      clear(tenseHost);
+      if (chosenType !== "conjugation" || !conj) return;
+      const activeTenseObjs = conj.tenses.filter((t) => ls.activeTenses.includes(t.id));
+      if (activeTenseObjs.length === 0) {
+        tenseHost.appendChild(h("div", { class: "empty", style: { marginTop: "12px" } }, "No tienes tiempos activos. Actívalos en la pestaña Conjugación."));
+        return;
+      }
+      const chips = h("div", { class: "chips", style: { marginTop: "10px" } },
+        activeTenseObjs.map((t) => {
+          const on = chosenTenses.includes(t.id);
+          return h("button", {
+            class: "chip" + (on ? " on" : ""),
+            onclick: (e) => {
+              const i = chosenTenses.indexOf(t.id);
+              if (i >= 0) chosenTenses.splice(i, 1);
+              else chosenTenses.push(t.id);
+              e.currentTarget.classList.toggle("on");
+              e.currentTarget.textContent = (chosenTenses.includes(t.id) ? "✓ " : "") + t.label;
+            },
+          }, (on ? "✓ " : "") + t.label);
+        })
+      );
+      tenseHost.appendChild(
+        h("div", { style: { marginTop: "6px", textAlign: "left" } }, [
+          h("div", { class: "muted", style: { fontSize: "13px", marginBottom: "4px" } }, "¿Qué tiempo(s) quieres practicar? (toca para elegir)"),
+          chips,
+        ])
+      );
+    }
+
     const cards = types.map((t) =>
       h("button", {
         class: "quiz-type" + (t.id === chosenType ? " on" : ""),
         onclick: (e) => {
           chosenType = t.id;
-          // marcar visualmente
           e.currentTarget.parentElement.querySelectorAll(".quiz-type").forEach((el) => el.classList.remove("on"));
           e.currentTarget.classList.add("on");
+          renderTensePicker();
         },
       }, [h("div", { class: "quiz-type-title" }, t.label), h("div", { class: "muted", style: { fontSize: "12px" } }, t.desc)])
     );
@@ -828,11 +1059,14 @@ function renderQuiz() {
       h("div", { class: "section-title" }, "¿Qué quieres practicar?"),
       h("p", { class: "muted" }, "Elige el tipo de quiz. Las palabras nuevas y las que más fallas salen con más frecuencia."),
       h("div", { class: "quiz-type-grid" }, cards),
+      tenseHost,
       h("div", { class: "inline", style: { justifyContent: "center", marginTop: "18px" } }, [
         h("button", {
           class: "btn primary",
           onclick: () => {
-            const questions = buildQuiz(words, m.id, ls.activeTenses, Math.min(10, Math.max(5, words.length)), chosenType);
+            // Para conjugación, usar solo los tiempos elegidos (o todos los activos si no marcó ninguno).
+            const tensesForQuiz = chosenType === "conjugation" ? (chosenTenses.length ? chosenTenses : ls.activeTenses) : ls.activeTenses;
+            const questions = buildQuiz(words, m.id, tensesForQuiz, Math.min(10, Math.max(5, words.length)), chosenType);
             if (questions.length === 0) {
               const msg =
                 chosenType === "conjugation"

@@ -25,14 +25,23 @@ async function translateOne(text, from, to) {
   if (!t) throw new Error("sin traducción");
   // MyMemory a veces devuelve avisos en MAYÚSCULAS cuando excede el límite.
   if (/MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(t)) throw new Error("límite del servicio");
-  return t;
+  // match: calidad (0..1). Lo usamos para detectar palabras dudosas.
+  const match = data.responseData.match;
+  return { text: t, match: typeof match === "number" ? match : null };
+}
+
+// quita acentos y pasa a minúsculas (para comparar palabra original vs traducción)
+function simplify(s) {
+  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
 // Traduce una palabra del idioma de aprendizaje a inglés y español.
-// Devuelve { en, es, error } — error es un texto si algo falló (para avisar al usuario).
+// Devuelve { en, es, error, warning }:
+//   - error: algo falló (sin red / límite)
+//   - warning: la palabra parece mal escrita o no reconocida (el usuario decide)
 export async function autoTranslate(term, learningLangId) {
   const from = LANG_CODE[learningLangId] || "en";
-  const result = { en: "", es: "", error: null };
+  const result = { en: "", es: "", error: null, warning: null };
   if (!term || !term.trim()) {
     result.error = "Escribe primero la palabra.";
     return result;
@@ -41,13 +50,29 @@ export async function autoTranslate(term, learningLangId) {
   try {
     // Pedimos inglés y español en paralelo. Si una falla, intentamos conservar la otra.
     const [enRes, esRes] = await Promise.allSettled([
-      from === "en" ? Promise.resolve(clean) : translateOne(clean, from, "en"),
-      from === "es" ? Promise.resolve(clean) : translateOne(clean, from, "es"),
+      from === "en" ? Promise.resolve({ text: clean, match: 1 }) : translateOne(clean, from, "en"),
+      from === "es" ? Promise.resolve({ text: clean, match: 1 }) : translateOne(clean, from, "es"),
     ]);
-    if (enRes.status === "fulfilled") result.en = enRes.value;
-    if (esRes.status === "fulfilled") result.es = esRes.value;
-    if (enRes.status === "rejected" && esRes.status === "rejected") {
+    const enOk = enRes.status === "fulfilled" ? enRes.value : null;
+    const esOk = esRes.status === "fulfilled" ? esRes.value : null;
+    if (enOk) result.en = enOk.text;
+    if (esOk) result.es = esOk.text;
+    if (!enOk && !esOk) {
       result.error = "No se pudo traducir ahora. Revisa tu conexión o escríbelo a mano.";
+      return result;
+    }
+
+    // --- Detección de posible error ortográfico ---
+    // Señales: (1) la "traducción" es idéntica a la palabra original (no la tradujo),
+    //          (2) la calidad (match) es baja.
+    const sameAsInput = (r) => r && simplify(r.text) === simplify(clean);
+    const lowMatch = (r) => r && typeof r.match === "number" && r.match < 0.5;
+    const notTranslated = sameAsInput(enOk) && sameAsInput(esOk);
+    const poorQuality = lowMatch(enOk) && lowMatch(esOk);
+    if (notTranslated || poorQuality) {
+      result.warning =
+        `No encontré una traducción fiable de “${clean}”. ¿Está bien escrita? ` +
+        `Puedes corregirla, o guardarla tal cual si estás seguro.`;
     }
   } catch (e) {
     result.error = "No se pudo traducir: " + e.message;
